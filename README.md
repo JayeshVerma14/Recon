@@ -53,6 +53,22 @@ named after the two source files. Clicking a `Src` cell (or double-clicking any 
 that line in the reconciled PDF.
 
 **Reconciled PDF viewer** — reference pane, working pane and a comments rail.
+The left pane is the *reference*, and it switches renderer by file type: the filing renders as a
+PDF page, the supporting workbook renders as a real spreadsheet — column letters, row numbers, sheet
+tabs, and a formula bar showing what is actually in the selected cell. Flagged cells are tinted
+amber and carry the same number as their comment.
+
+Three kinds of finding, each with its own anchor and card:
+
+| Kind | Anchored on | Card shows | Resolutions |
+| --- | --- | --- | --- |
+| **Value** | the number in both pages | working / reference / difference | Accept working · Use reference · Dismiss |
+| **Formula** | the cell in the workbook | the cell's formula, the defect, the expected formula | Accept working · Apply expected · Dismiss |
+| **Text** | the passage, highlighted in place | word-level diff of the two wordings | Use reference wording · Keep working · Dismiss |
+
+Text findings highlight the passage inside the narrative notes on both pages, with the comment
+number attached to the highlight. When a passage exists on one side only, the working page shows a
+dashed "Passage not found on this document" block instead.
 Marks: tick / cross tool (`t` / `c`), click a line to mark it, click the mark to clear it. Comments
 are cards, not a banner — each shows working vs reference vs difference, the agent's reason, and
 three resolutions: **Accept working**, **Use reference** (writes the reference value into the

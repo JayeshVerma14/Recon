@@ -9,6 +9,7 @@ import { Workbook } from "@/components/workbook/Workbook";
 import { ReconcileViewer } from "@/components/viewer/ReconcileViewer";
 import { Button } from "@/components/element";
 import { isReviewed } from "@/lib/derive";
+import { buildIssues } from "@/lib/issues";
 import { useActiveProject, useStore } from "@/lib/store";
 
 export default function DocumentReconciliationPage() {
@@ -25,7 +26,8 @@ export default function DocumentReconciliationPage() {
     return rows.length > 0 && rows.every(isReviewed);
   }).length;
 
-  const openComments = project.items.filter((i) => i.explanation && !resolved.includes(i.id));
+  const issues = React.useMemo(() => buildIssues(project), [project]);
+  const openComments = issues.filter((i) => !resolved.includes(i.id));
 
   return (
     <AppShell>
@@ -50,7 +52,7 @@ export default function DocumentReconciliationPage() {
           <button
             type="button"
             disabled={openComments.length === 0}
-            onClick={() => setViewer({ open: true, itemId: openComments[0]?.id ?? null })}
+            onClick={() => setViewer({ open: true, itemId: openComments[0]?.itemId ?? null })}
             className="inline-flex items-center gap-2.5 rounded-xl border border-border bg-surface px-4 py-2.5 text-body transition-colors duration-fast hover:border-brand/40 disabled:opacity-60 disabled:hover:border-border"
           >
             <MessageSquare className="h-4 w-4 text-muted-foreground" />
@@ -74,7 +76,7 @@ export default function DocumentReconciliationPage() {
             <Button
               variant="outline"
               className="h-11 rounded-xl px-4"
-              onClick={() => setViewer({ open: true, itemId: openComments[0]?.id ?? null })}
+              onClick={() => setViewer({ open: true, itemId: openComments[0]?.itemId ?? null })}
             >
               <FileCheck2 />
               Reconciled PDF
