@@ -81,8 +81,13 @@ interface State {
 
   /* comments */
   resolvedComments: string[];
-  resolveComment: (id: string, outcome: "accept" | "reference" | "dismiss") => void;
-  reopenComment: (id: string) => void;
+  /** issueId identifies the comment; itemId is the reconciled line it acts on, when there is one. */
+  resolveComment: (
+    issueId: string,
+    itemId: string | null,
+    outcome: "accept" | "reference" | "dismiss"
+  ) => void;
+  reopenComment: (issueId: string) => void;
 
   /* wizard */
   setDraft: (patch: Partial<Draft>) => void;
@@ -206,25 +211,27 @@ export const useStore = create<State>((set, get) => ({
 
   resolvedComments: [],
 
-  resolveComment: (id, outcome) => {
+  resolveComment: (issueId, itemId, outcome) => {
     const { projects, activeProjectId } = get();
     const project = projects.find((p) => p.id === activeProjectId);
-    const item = project?.items.find((i) => i.id === id);
-    if (!item) return;
+    const item = itemId ? project?.items.find((i) => i.id === itemId) : undefined;
 
-    if (outcome === "accept") {
-      get().setStatus([id], "approved", "Working value accepted from the reconciled PDF.");
-    } else if (outcome === "reference") {
-      get().editValue(id, item.valueA);
-      get().setStatus([id], "approved", "Reference value applied from the reconciled PDF.");
-    } else {
-      get().addNote(id, "Comment dismissed — difference accepted as presentation only.");
+    /* wording-only findings carry no number to change — they still record a decision */
+    if (item) {
+      if (outcome === "accept") {
+        get().setStatus([item.id], "approved", "Working value accepted from the reconciled PDF.");
+      } else if (outcome === "reference") {
+        get().editValue(item.id, item.valueA);
+        get().setStatus([item.id], "approved", "Reference value applied from the reconciled PDF.");
+      } else {
+        get().addNote(item.id, "Comment dismissed — difference accepted as presentation only.");
+      }
     }
 
     set((s) => ({
-      resolvedComments: s.resolvedComments.includes(id)
+      resolvedComments: s.resolvedComments.includes(issueId)
         ? s.resolvedComments
-        : [...s.resolvedComments, id],
+        : [...s.resolvedComments, issueId],
     }));
   },
 
