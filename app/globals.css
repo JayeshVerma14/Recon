@@ -1,0 +1,114 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /* Semantic tokens as RGB channels so Tailwind opacity modifiers
+     (bg-surface/95, bg-foreground/[0.06]) resolve. Hex shown alongside. */
+  :root {
+    --background: 255 255 255; /* #FFFFFF */
+    --foreground: 10 37 64; /* #0A2540 */
+    --surface: 255 255 255; /* #FFFFFF */
+    --surface-secondary: 246 249 252; /* #F6F9FC */
+    --muted-foreground: 66 84 102; /* #425466 */
+    --border: 227 232 238; /* #E3E8EE */
+    --border-subtle: 238 242 246; /* #EEF2F6 */
+  }
+
+  * {
+    border-color: rgb(var(--border));
+  }
+
+  body {
+    background: rgb(var(--background));
+    color: rgb(var(--foreground));
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Focus is always visible — 2px ring, never a bare :focus. */
+  :focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px rgb(var(--background)), 0 0 0 4px rgba(70, 100, 220, 0.55);
+    border-radius: 4px;
+  }
+}
+
+/* Brand button skins live outside @layer so they beat the utility classes the
+   Button variants ship (text-background, bg-foreground) at equal specificity. */
+
+  /* Primary CTA — the only place the brand gradient is used as a fill. */
+  .btn-brand {
+    background: linear-gradient(135deg, #5ab7e3 0%, #4664dc 55%, #3c4fdb 100%);
+    color: #ffffff;
+    transition: opacity 150ms ease-out;
+  }
+  .btn-brand:hover {
+    opacity: 0.95;
+  }
+
+  /* Gradient border, white interior. */
+  .btn-brand-outline {
+    position: relative;
+    background: #ffffff;
+    color: #3c4fdb;
+    border: 1px solid transparent;
+    background-image: linear-gradient(#fff, #fff),
+      linear-gradient(135deg, #5ab7e3 0%, #4664dc 55%, #3c4fdb 100%);
+    background-origin: border-box;
+    background-clip: padding-box, border-box;
+    transition: background-color 150ms ease-out;
+  }
+  .btn-brand-outline:hover {
+    background-image: linear-gradient(rgba(70, 100, 220, 0.05), rgba(70, 100, 220, 0.05)),
+      linear-gradient(135deg, #5ab7e3 0%, #4664dc 55%, #3c4fdb 100%);
+  }
+
+  /* Subtle gradient fill that expands on hover. */
+  .btn-brand-soft {
+    background: linear-gradient(
+      135deg,
+      rgba(90, 183, 227, 0.14) 0%,
+      rgba(70, 100, 220, 0.14) 55%,
+      rgba(60, 79, 219, 0.14) 100%
+    );
+    color: #3c4fdb;
+    transition: background 150ms ease-out;
+  }
+  .btn-brand-soft:hover {
+    background: linear-gradient(
+      135deg,
+      rgba(90, 183, 227, 0.22) 0%,
+      rgba(70, 100, 220, 0.22) 55%,
+      rgba(60, 79, 219, 0.22) 100%
+    );
+  }
+
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+
+@layer utilities {
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(10, 37, 64, 0.18) transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background: rgba(10, 37, 64, 0.18);
+    border-radius: 9999px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
