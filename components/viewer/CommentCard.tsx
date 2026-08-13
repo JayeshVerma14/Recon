@@ -3,7 +3,7 @@
 import * as React from "react";
 import { ArrowDownToLine, Check, CornerUpLeft, FileText, Hash, Sigma } from "lucide-react";
 
-import { Button } from "@/components/element";
+import { Button, Tooltip } from "@/components/element";
 import { difference, effectiveValue, formatDifference, formatValue } from "@/lib/derive";
 import { statementLabel } from "@/lib/mock";
 import { wordDiff, type Issue } from "@/lib/issues";
@@ -185,7 +185,7 @@ export function CommentCard({
                 Keep working
               </Button>
             </>
-          ) : (
+          ) : issue.kind === "formula" ? (
             <>
               <Button
                 variant="successSoft"
@@ -207,20 +207,42 @@ export function CommentCard({
                 }}
               >
                 <ArrowDownToLine />
-                {issue.kind === "formula" ? "Apply expected" : "Use reference"}
+                Apply expected
               </Button>
             </>
+          ) : (
+            /* A reported value can only be signed off — overwriting a figure that
+               flows from an upstream difference would hide the cause, not fix it. */
+            <Tooltip content="Sign the line off at the working value and record the decision in its review history">
+              <span>
+                <Button
+                  variant="successSoft"
+                  size="xs"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onResolve("accept");
+                  }}
+                >
+                  <Check />
+                  Resolve
+                </Button>
+              </span>
+            </Tooltip>
           )}
-          <Button
-            variant="ghost"
-            size="xs"
-            onClick={(e) => {
-              e.stopPropagation();
-              onResolve("dismiss");
-            }}
-          >
-            Dismiss
-          </Button>
+          <Tooltip content="Close the comment without signing the line off — recorded as immaterial">
+            <span>
+              <Button
+                variant="ghost"
+                size="xs"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onResolve("dismiss");
+                }}
+              >
+                Dismiss
+              </Button>
+            </span>
+          </Tooltip>
         </div>
       )}
     </li>

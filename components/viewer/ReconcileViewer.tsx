@@ -219,9 +219,11 @@ export function ReconcileViewer({
             ? `Working wording kept · ${issue.title}`
             : `Comment dismissed · ${issue.title}`
         : outcome === "accept"
-          ? `Accepted working value · ${issue.title}`
+          ? issue.kind === "value"
+            ? `Resolved · ${issue.title}`
+            : `Accepted working value · ${issue.title}`
           : outcome === "reference"
-            ? `Reference value applied · ${issue.title}`
+            ? `Expected formula applied · ${issue.title}`
             : `Comment dismissed · ${issue.title}`
     );
   };
