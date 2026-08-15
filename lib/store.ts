@@ -15,6 +15,13 @@ import type {
 } from "@/lib/types";
 
 export type ConfidenceFilter = "all" | "high" | "medium" | "low";
+
+/**
+ * What a reviewer did with a comment. The reconciled document is read-only, so
+ * a comment is never "applied" — it is closed, or sent back to whoever owns the
+ * source document.
+ */
+export type Disposition = "resolved" | "flagged" | "dismissed";
 export type StatusFilter = "all" | ReviewStatus;
 
 export interface Filters {
@@ -80,13 +87,9 @@ interface State {
   addNote: (id: string, note: string) => void;
 
   /* comments */
-  resolvedComments: string[];
-  /** issueId identifies the comment; itemId is the reconciled line it acts on, when there is one. */
-  resolveComment: (
-    issueId: string,
-    itemId: string | null,
-    outcome: "accept" | "reference" | "dismiss"
-  ) => void;
+  commentDisposition: Record<string, Disposition>;
+  /** issueId identifies the comment; itemId is the reconciled line it annotates, when there is one. */
+  disposeComment: (issueId: string, itemId: string | null, disposition: Disposition) => void;
   reopenComment: (issueId: string) => void;
 
   /* wizard */
@@ -209,34 +212,37 @@ export const useStore = create<State>((set, get) => ({
       })),
     })),
 
-  resolvedComments: [],
+  commentDisposition: {},
 
-  resolveComment: (issueId, itemId, outcome) => {
+  disposeComment: (issueId, itemId, disposition) => {
     const { projects, activeProjectId } = get();
     const project = projects.find((p) => p.id === activeProjectId);
     const item = itemId ? project?.items.find((i) => i.id === itemId) : undefined;
 
-    /* wording-only findings carry no number to change — they still record a decision */
+    /* nothing here writes to the reconciled document — only to the audit trail */
     if (item) {
-      if (outcome === "accept") {
-        get().setStatus([item.id], "approved", "Working value accepted from the reconciled PDF.");
-      } else if (outcome === "reference") {
-        get().editValue(item.id, item.valueA);
-        get().setStatus([item.id], "approved", "Reference value applied from the reconciled PDF.");
+      if (disposition === "resolved") {
+        get().setStatus([item.id], "approved", "Agreed on review — the reconciled figure stands.");
+      } else if (disposition === "flagged") {
+        get().setStatus(
+          [item.id],
+          "needs_review",
+          "Raised with the preparer — the source document needs correcting."
+        );
       } else {
-        get().addNote(item.id, "Comment dismissed — difference accepted as presentation only.");
+        get().addNote(item.id, "Dismissed as immaterial — no correction required.");
       }
     }
 
-    set((s) => ({
-      resolvedComments: s.resolvedComments.includes(issueId)
-        ? s.resolvedComments
-        : [...s.resolvedComments, issueId],
-    }));
+    set((s) => ({ commentDisposition: { ...s.commentDisposition, [issueId]: disposition } }));
   },
 
-  reopenComment: (id) =>
-    set((s) => ({ resolvedComments: s.resolvedComments.filter((x) => x !== id) })),
+  reopenComment: (issueId) =>
+    set((s) => {
+      const next = { ...s.commentDisposition };
+      delete next[issueId];
+      return { commentDisposition: next };
+    }),
 
   setDraft: (patch) => set((s) => ({ draft: { ...s.draft, ...patch } })),
   resetDraft: () => set({ draft: EMPTY_DRAFT }),

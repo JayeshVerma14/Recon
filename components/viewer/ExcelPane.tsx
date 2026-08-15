@@ -4,10 +4,17 @@ import * as React from "react";
 
 import { effectiveValue, formatValue } from "@/lib/derive";
 import { cn } from "@/lib/utils";
-import type { Issue } from "@/lib/issues";
+import { implicates, type Issue } from "@/lib/issues";
+import type { Disposition } from "@/lib/store";
 import type { LineItem, Project } from "@/lib/types";
 
 const COLUMNS = ["A", "B", "C", "D", "E"];
+
+const SHEET_FOR_STATEMENT: Record<string, string> = {
+  income: "IS_Model",
+  balance: "BS_Model",
+  cashflow: "CF_Model",
+};
 
 /**
  * The workbook side of a PDF + Excel reconciliation. Cells the agent flagged
@@ -20,7 +27,7 @@ export function ExcelPane({
   items,
   issues,
   issueNumber,
-  resolvedIds,
+  dispositions,
   focusId,
   hoveredItemId,
   onHover,
@@ -32,7 +39,7 @@ export function ExcelPane({
   items: LineItem[];
   issues: Issue[];
   issueNumber: Map<string, number>;
-  resolvedIds: string[];
+  dispositions: Record<string, Disposition>;
   focusId: string | null;
   hoveredItemId: string | null;
   onHover: (id: string | null) => void;
@@ -43,11 +50,16 @@ export function ExcelPane({
 
   const issueByCell = React.useMemo(() => {
     const map = new Map<string, Issue>();
-    issues
-      .filter((i) => i.kind === "formula" && i.sheet === sheet && i.cell)
-      .forEach((i) => map.set(i.cell!, i));
+    issues.filter((i) => implicates(i, "excel")).forEach((issue) => {
+      /* a formula finding names its own cell; a value finding inherits the line's */
+      const cell =
+        issue.cell ?? items.find((item) => item.id === issue.itemId)?.sourceB.cell ?? undefined;
+      const onSheet =
+        issue.sheet ?? items.find((item) => item.id === issue.itemId)?.sourceB.sheet ?? undefined;
+      if (cell && onSheet === sheet) map.set(cell, issue);
+    });
     return map;
-  }, [issues, sheet]);
+  }, [issues, sheet, items]);
 
   const rows = React.useMemo(() => {
     const map = new Map<number, LineItem>();
@@ -63,6 +75,10 @@ export function ExcelPane({
 
   const selectedIssue = issueByCell.get(selected);
   const selectedItem = onSheet.find((i) => i.sourceB.cell === selected);
+  const excelValue = (item: LineItem) => {
+    const issue = issues.find((i) => i.itemId === item.id);
+    return issue?.excelValue ?? effectiveValue(item);
+  };
 
   /* follow the focused finding into the sheet */
   React.useEffect(() => {
@@ -92,7 +108,7 @@ export function ExcelPane({
           )}
         >
           {selectedIssue?.formula ??
-            (selectedItem ? formatValue(effectiveValue(selectedItem), selectedItem.unit) : "")}
+            (selectedItem ? formatValue(excelValue(selectedItem), selectedItem.unit) : "")}
         </span>
         {selectedIssue && (
           <button
@@ -100,7 +116,8 @@ export function ExcelPane({
             onClick={() => onSelectIssue(selectedIssue.id)}
             className="shrink-0 rounded bg-critical px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-white"
           >
-            {selectedIssue.defect}
+            {selectedIssue.defect ??
+              (selectedIssue.side === "excel" ? "Workbook differs" : "Sources disagree")}
           </button>
         )}
       </div>
@@ -140,7 +157,8 @@ export function ExcelPane({
                   const issue = issueByCell.get(ref);
                   const isSelected = selected === ref;
                   const linked = Boolean(item && item.id === hoveredItemId);
-                  const resolved = issue ? resolvedIds.includes(issue.id) : false;
+                  const closed = issue ? dispositions[issue.id] !== undefined : false;
+                  const resolved = issue ? dispositions[issue.id] === "resolved" : false;
 
                   return (
                     <td
@@ -156,8 +174,9 @@ export function ExcelPane({
                         isValue && "text-right font-mono tabular-nums",
                         isPrior && "text-right font-mono tabular-nums text-[#9AA5B1]",
                         linked && "bg-[rgba(70,100,220,0.06)]",
-                        issue && !resolved && "bg-[rgba(245,196,49,0.22)]",
-                        issue && resolved && "bg-[rgba(23,152,100,0.10)]",
+                        issue && !closed && "bg-[rgba(245,196,49,0.22)]",
+                        issue && closed && resolved && "bg-[rgba(23,152,100,0.10)]",
+                        issue && closed && !resolved && "bg-[rgba(148,163,184,0.14)]",
                         isSelected && "ring-2 ring-inset ring-brand"
                       )}
                     >
@@ -168,13 +187,17 @@ export function ExcelPane({
                       )}
                       {isValue && (
                         <span className="inline-flex items-center gap-1 text-[#1B2733]">
-                          {formatValue(effectiveValue(item), item.unit)}
+                          {formatValue(excelValue(item), item.unit)}
                           {issue && (
                             <span
                               title={issue.defect}
                               className={cn(
                                 "inline-flex h-3.5 w-3.5 items-center justify-center rounded-full text-[8px] font-semibold text-white",
-                                resolved ? "bg-[#179864]" : "bg-critical"
+                                resolved
+                                  ? "bg-[#179864]"
+                                  : closed
+                                    ? "bg-[#94A3B8]"
+                                    : "bg-critical"
                               )}
                             >
                               {issueNumber.get(issue.id) ?? "!"}
@@ -199,8 +222,10 @@ export function ExcelPane({
       {/* sheet tabs */}
       <div className="flex shrink-0 items-center gap-1 overflow-x-auto scrollbar-thin border-t border-[#D7DDE5] bg-[#F1F4F8] px-2 py-1">
         {project.docB.sheets?.map((name) => {
-          const flagged = issues.filter((i) => i.kind === "formula" && i.sheet === name);
-          const openFlags = flagged.filter((i) => !resolvedIds.includes(i.id)).length;
+          const flagged = issues.filter(
+            (i) => implicates(i, "excel") && (i.sheet ?? SHEET_FOR_STATEMENT[i.statement]) === name
+          );
+          const openFlags = flagged.filter((i) => dispositions[i.id] === undefined).length;
           return (
             <span
               key={name}

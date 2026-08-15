@@ -58,13 +58,34 @@ PDF page, the supporting workbook renders as a real spreadsheet — column lette
 tabs, and a formula bar showing what is actually in the selected cell. Flagged cells are tinted
 amber and carry the same number as their comment.
 
+The reconciled document in the middle is **read-only** — it is the output, not a draft. Nothing in
+the viewer writes to it. A comment is closed by a *disposition*, never by applying a value:
+
+| Disposition | Meaning | Recorded |
+| --- | --- | --- |
+| **Resolve** | checked and agreed, the reconciled figure stands | line approved, entry in review history |
+| **Flag source** | the source document needs correcting — back to the preparer | line set to Needs Review, named against the offending document |
+| **Dismiss** | immaterial to the reconciliation | note only, no approval |
+
+Every finding also names **which document is the outlier**, because "they differ" is not actionable
+on its own — a correction has to be raised against a specific document:
+
+- **Filing differs** — the workbook and the reconciled statement agree; the PDF is out
+- **Workbook differs** — the filing and the reconciled statement agree; the model is out
+- **Sources disagree** — the two sources contradict each other, and the card shows how far apart
+
+Each card carries a three-row ledger — Reconciled / Filing / Workbook — with `agrees` against the
+source that matches and a signed delta against the one that does not, so the odd one out is visible
+without arithmetic. Findings are grouped in the rail under those three headings, marks appear only
+in the document actually implicated, and selecting a card opens that document's pane.
+
 Three kinds of finding, each with its own anchor and card:
 
-| Kind | Anchored on | Card shows | Resolutions |
-| --- | --- | --- | --- |
-| **Value** | the number in both pages | working / reference / difference | Accept working · Use reference · Dismiss |
-| **Formula** | the cell in the workbook | the cell's formula, the defect, the expected formula | Accept working · Apply expected · Dismiss |
-| **Text** | the passage, highlighted in place | word-level diff of the two wordings | Use reference wording · Keep working · Dismiss |
+| Kind | Anchored on | Card shows |
+| --- | --- | --- |
+| **Value** | the number in every page it appears on | the three-source ledger |
+| **Formula** | the cell in the workbook | the cell's formula, the defect, the expected formula |
+| **Text** | the passage, highlighted in place | word-level diff of the two wordings |
 
 Text findings highlight the passage inside the narrative notes on both pages, with the comment
 number attached to the highlight. When a passage exists on one side only, the working page shows a
