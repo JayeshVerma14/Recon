@@ -13,7 +13,8 @@ export type ProjectStatus = "draft" | "running" | "in_review" | "completed";
 export type DocKind = "pdf" | "xlsx";
 
 export interface DocumentMeta {
-  id: "A" | "B";
+  /** "A" and "B" are the primary pair; further sources carry their own ids. */
+  id: string;
   fileName: string;
   kind: DocKind;
   sizeMb: number;
@@ -24,7 +25,7 @@ export interface DocumentMeta {
 }
 
 export interface SourceRef {
-  doc: "A" | "B";
+  doc: string;
   /** PDF page number. */
   page?: number;
   /** Workbook sheet + cell. */
@@ -92,6 +93,8 @@ export interface Project {
   comparisonPeriod?: string;
   docA: DocumentMeta;
   docB: DocumentMeta;
+  /** Every source in the reconciliation. Falls back to [docA, docB] when unset. */
+  extraDocs?: DocumentMeta[];
   statements: StatementId[];
   matching: MatchingRule;
   tolerance: number;

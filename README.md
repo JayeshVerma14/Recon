@@ -67,6 +67,35 @@ the viewer writes to it. A comment is closed by a *disposition*, never by applyi
 | **Flag source** | the source document needs correcting — back to the preparer | line set to Needs Review, named against the offending document |
 | **Dismiss** | immaterial to the reconciliation | note only, no approval |
 
+### Scaling past two sources
+
+A reconciliation is rarely two documents, so the viewer carries five: the filing, the model, a
+prior-year 10-K, a trial balance export and a board pack. Three things keep that legible.
+
+**The card collapses agreement.** Outliers are listed with their signed delta; every source that
+matches the reconciled figure collapses into one `4 sources agree` line that expands on demand. At
+five sources or fifteen the card is the same height, because the interesting fact is who is out.
+
+**The rail groups by shape, not by subset.** Grouping by "which documents disagree" is
+combinatorial; grouping by the shape of the disagreement is three stable buckets no matter how many
+sources there are:
+
+| Group | Meaning | What to do |
+| --- | --- | --- |
+| Sources agree, reconciled differs | every source lands on the same figure and the output does not | re-read the extraction |
+| One source out | the rest agree | raise a correction against that document |
+| Sources split | no majority | someone has to decide which stands |
+
+**The source lens.** A source selector above the panes. Picking one keeps its findings at full
+strength and drops the rest to a dimmed outline — still on the page, still clickable, still counted,
+so a page never looks cleaner than it is. Alongside it, an optional **agreement grid** puts a strip
+of per-source cells beside every line: a red column is a document that is wrong everywhere, a red
+row is an account nobody agrees on. Neither the card nor the lens can show that pattern.
+
+Source identity is deliberately *not* encoded in colour — colour already carries review status
+(open, resolved, flagged, dismissed), and a second colour dimension would collide with it and break
+past four sources.
+
 Every finding also names **which document is the outlier**, because "they differ" is not actionable
 on its own — a correction has to be raised against a specific document:
 
