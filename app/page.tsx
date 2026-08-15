@@ -15,7 +15,7 @@ import { useActiveProject, useStore } from "@/lib/store";
 export default function DocumentReconciliationPage() {
   const router = useRouter();
   const project = useActiveProject();
-  const resolved = useStore((s) => s.resolvedComments);
+  const dispositions = useStore((s) => s.commentDisposition);
   const [viewer, setViewer] = React.useState<{ open: boolean; itemId: string | null }>({
     open: false,
     itemId: null,
@@ -27,7 +27,7 @@ export default function DocumentReconciliationPage() {
   }).length;
 
   const issues = React.useMemo(() => buildIssues(project), [project]);
-  const openComments = issues.filter((i) => !resolved.includes(i.id));
+  const openComments = issues.filter((i) => dispositions[i.id] === undefined);
 
   return (
     <AppShell>

@@ -8,17 +8,30 @@ import type { LineItem, Project, StatementId } from "@/lib/types";
  */
 export type IssueKind = "value" | "text" | "formula";
 
+/**
+ * Which document is the outlier. The reconciled document in the middle is
+ * read-only — it is the output — so a finding is a statement about a *source*:
+ * either the filing is wrong, the workbook is wrong, or the two sources
+ * disagree with each other and someone has to decide which one stands.
+ */
+export type Disagreement = "pdf" | "excel" | "both";
+
 export interface Issue {
   id: string;
   kind: IssueKind;
+  side: Disagreement;
   statement: StatementId;
   /** Heading shown on the card. */
   title: string;
   explanation: string;
   confidence: number;
 
-  /** value + formula issues resolve against a reconciled line. */
+  /** value + formula issues are anchored to a reconciled line. */
   itemId?: string;
+  /** The three figures in play. Absent means "same as the reconciled figure". */
+  workingValue?: number;
+  pdfValue?: number;
+  excelValue?: number;
 
   /** text issues */
   workingText?: string;
@@ -109,6 +122,7 @@ export const NOTES: DocNote[] = [
 /** The exact span each text finding highlights, per side. */
 const TEXT_ISSUES: {
   id: string;
+  side: Disagreement;
   noteId: string;
   statement: StatementId;
   title: string;
@@ -120,6 +134,7 @@ const TEXT_ISSUES: {
 }[] = [
   {
     id: "txt-inc-1",
+    side: "both",
     noteId: "note-inc-1",
     statement: "income",
     title: "Revenue recognition wording differs",
@@ -131,6 +146,7 @@ const TEXT_ISSUES: {
   },
   {
     id: "txt-inc-2",
+    side: "both",
     noteId: "note-inc-2",
     statement: "income",
     title: "Effective tax rate stated differently",
@@ -142,6 +158,7 @@ const TEXT_ISSUES: {
   },
   {
     id: "txt-inc-3",
+    side: "both",
     noteId: "note-inc-3",
     statement: "income",
     title: "Subsequent event dated differently",
@@ -153,6 +170,7 @@ const TEXT_ISSUES: {
   },
   {
     id: "txt-bal-1",
+    side: "both",
     noteId: "note-bal-1",
     statement: "balance",
     title: "Receivables stated gross, not net",
@@ -164,6 +182,7 @@ const TEXT_ISSUES: {
   },
   {
     id: "txt-bal-2",
+    side: "pdf",
     noteId: "note-bal-2",
     statement: "balance",
     title: "Going concern statement missing",
@@ -177,6 +196,7 @@ const TEXT_ISSUES: {
   },
   {
     id: "txt-cf-1",
+    side: "both",
     noteId: "note-cf-1",
     statement: "cashflow",
     title: "Restricted cash treated differently",
@@ -194,6 +214,7 @@ const FORMULA_ISSUES: {
   id: string;
   itemId: string;
   statement: StatementId;
+  side: Disagreement;
   sheet: string;
   cell: string;
   formula: string;
@@ -204,6 +225,7 @@ const FORMULA_ISSUES: {
 }[] = [
   {
     id: "fx-inc-1",
+    side: "both",
     itemId: "income-04",
     statement: "income",
     sheet: "IS_Model",
@@ -217,6 +239,7 @@ const FORMULA_ISSUES: {
   },
   {
     id: "fx-inc-2",
+    side: "excel",
     itemId: "income-09",
     statement: "income",
     sheet: "IS_Model",
@@ -230,6 +253,7 @@ const FORMULA_ISSUES: {
   },
   {
     id: "fx-inc-3",
+    side: "excel",
     itemId: "income-16",
     statement: "income",
     sheet: "IS_Model",
@@ -243,6 +267,7 @@ const FORMULA_ISSUES: {
   },
   {
     id: "fx-bal-1",
+    side: "excel",
     itemId: "balance-03",
     statement: "balance",
     sheet: "BS_Model",
@@ -256,6 +281,7 @@ const FORMULA_ISSUES: {
   },
   {
     id: "fx-bal-2",
+    side: "both",
     itemId: "balance-09",
     statement: "balance",
     sheet: "BS_Model",
@@ -269,6 +295,7 @@ const FORMULA_ISSUES: {
   },
   {
     id: "fx-cf-1",
+    side: "excel",
     itemId: "cashflow-21",
     statement: "cashflow",
     sheet: "CF_Model",
@@ -282,41 +309,156 @@ const FORMULA_ISSUES: {
   },
 ];
 
+
+/* --------------------- one source wrong, the other right -------------------- */
+
+/**
+ * Where only one source is out, the reconciled figure follows the source that
+ * agrees with the rest of the statement — and the finding names the outlier so
+ * the correction is raised against the right document.
+ */
+const SINGLE_SOURCE_ISSUES: {
+  id: string;
+  itemId: string;
+  statement: StatementId;
+  side: Exclude<Disagreement, "both">;
+  working: number;
+  pdf: number;
+  excel: number;
+  explanation: string;
+  confidence: number;
+}[] = [
+  {
+    id: "src-inc-1",
+    itemId: "income-11",
+    statement: "income",
+    side: "pdf",
+    working: 4100,
+    pdf: 4180,
+    excel: 4100,
+    explanation:
+      "The filing prints 4,180 while the workbook and the reconciled statement both carry 4,100. The figure in the filing predates the final depreciation run — raise it against the filing, not the model.",
+    confidence: 88,
+  },
+  {
+    id: "src-inc-2",
+    itemId: "income-06",
+    statement: "income",
+    side: "excel",
+    working: 9800,
+    pdf: 9800,
+    excel: 9860,
+    explanation:
+      "The workbook is 60 higher than both the filing and the reconciled statement. A media accrual is picked up twice on the marketing tab.",
+    confidence: 82,
+  },
+  {
+    id: "src-bal-1",
+    itemId: "balance-01",
+    statement: "balance",
+    side: "pdf",
+    working: 18400,
+    pdf: 18040,
+    excel: 18400,
+    explanation:
+      "18,040 in the filing against 18,400 everywhere else — a transposed digit. The bank confirmation supports 18,400.",
+    confidence: 94,
+  },
+  {
+    id: "src-bal-2",
+    itemId: "balance-14",
+    statement: "balance",
+    side: "excel",
+    working: 8650,
+    pdf: 8650,
+    excel: 8560,
+    explanation:
+      "The workbook shows 8,560 where the filing and the reconciled statement agree on 8,650. Digits transposed in the accruals schedule.",
+    confidence: 86,
+  },
+  {
+    id: "src-cf-1",
+    itemId: "cashflow-03",
+    statement: "cashflow",
+    side: "excel",
+    working: 3850,
+    pdf: 3850,
+    excel: 3580,
+    explanation:
+      "Share-based payment expense is 3,580 in the workbook against 3,850 in the filing and the reconciled statement. The workbook omits the Q4 grant tranche.",
+    confidence: 90,
+  },
+];
+
 /* --------------------------------- builder --------------------------------- */
 
 export function buildIssues(project: Project): Issue[] {
   const byId = new Map(project.items.map((i) => [i.id, i]));
+  const claimed = new Set([
+    ...FORMULA_ISSUES.map((f) => f.itemId),
+    ...SINGLE_SOURCE_ISSUES.map((f) => f.itemId),
+  ]);
 
+  /* the two sources disagree with each other */
   const valueIssues: Issue[] = project.items
-    .filter((item) => item.explanation && !FORMULA_ISSUES.some((f) => f.itemId === item.id))
+    .filter((item) => item.explanation && !claimed.has(item.id))
     .map((item) => ({
       id: `val-${item.id}`,
       kind: "value" as const,
+      side: "both" as const,
       statement: item.statement,
       title: item.account,
       explanation: item.explanation!,
       confidence: item.confidence,
       itemId: item.id,
+      workingValue: item.valueB,
+      pdfValue: item.valueA,
+      excelValue: item.valueB,
     }));
 
-  const formulaIssues: Issue[] = FORMULA_ISSUES.filter((f) => byId.has(f.itemId)).map((f) => ({
-    id: f.id,
-    kind: "formula" as const,
-    statement: f.statement,
-    title: byId.get(f.itemId)!.account,
-    explanation: f.explanation,
-    confidence: f.confidence,
-    itemId: f.itemId,
-    sheet: f.sheet,
-    cell: f.cell,
-    formula: f.formula,
-    expectedFormula: f.expectedFormula,
-    defect: f.defect,
-  }));
+  /* exactly one source is out */
+  const singleSourceIssues: Issue[] = SINGLE_SOURCE_ISSUES.filter((f) => byId.has(f.itemId)).map(
+    (f) => ({
+      id: f.id,
+      kind: "value" as const,
+      side: f.side,
+      statement: f.statement,
+      title: byId.get(f.itemId)!.account,
+      explanation: f.explanation,
+      confidence: f.confidence,
+      itemId: f.itemId,
+      workingValue: f.working,
+      pdfValue: f.pdf,
+      excelValue: f.excel,
+    })
+  );
+
+  const formulaIssues: Issue[] = FORMULA_ISSUES.filter((f) => byId.has(f.itemId)).map((f) => {
+    const item = byId.get(f.itemId)!;
+    return {
+      id: f.id,
+      kind: "formula" as const,
+      side: f.side,
+      statement: f.statement,
+      title: item.account,
+      explanation: f.explanation,
+      confidence: f.confidence,
+      itemId: f.itemId,
+      workingValue: f.side === "excel" ? item.valueA : item.valueB,
+      pdfValue: item.valueA,
+      excelValue: item.valueB,
+      sheet: f.sheet,
+      cell: f.cell,
+      formula: f.formula,
+      expectedFormula: f.expectedFormula,
+      defect: f.defect,
+    };
+  });
 
   const textIssues: Issue[] = TEXT_ISSUES.map((t) => ({
     id: t.id,
     kind: "text" as const,
+    side: t.side,
     statement: t.statement,
     title: t.title,
     explanation: t.explanation,
@@ -328,10 +470,33 @@ export function buildIssues(project: Project): Issue[] {
   }));
 
   const order: Record<IssueKind, number> = { value: 0, formula: 1, text: 2 };
-  return [...valueIssues, ...formulaIssues, ...textIssues].sort(
+  return [...valueIssues, ...singleSourceIssues, ...formulaIssues, ...textIssues].sort(
     (a, b) => order[a.kind] - order[b.kind]
   );
 }
+
+/** The figure the reconciled document reports, per line. */
+export function workingValues(issues: Issue[]) {
+  const map = new Map<string, number>();
+  issues.forEach((issue) => {
+    if (issue.itemId && issue.workingValue !== undefined) map.set(issue.itemId, issue.workingValue);
+  });
+  return map;
+}
+
+/** Does this finding implicate the given document? */
+export function implicates(issue: Issue, doc: "pdf" | "excel") {
+  return issue.side === "both" || issue.side === doc;
+}
+
+export const SIDE_META: Record<
+  Disagreement,
+  { label: string; short: string; tint: string; fg: string }
+> = {
+  pdf: { label: "Filing differs", short: "Filing", tint: "rgba(220,38,38,0.10)", fg: "#B91C1C" },
+  excel: { label: "Workbook differs", short: "Workbook", tint: "rgba(245,158,11,0.14)", fg: "#B45309" },
+  both: { label: "Sources disagree", short: "Both", tint: "rgba(139,92,246,0.12)", fg: "#6D28D9" },
+};
 
 export function issuesForStatement(issues: Issue[], statement: StatementId) {
   return issues.filter((i) => i.statement === statement);

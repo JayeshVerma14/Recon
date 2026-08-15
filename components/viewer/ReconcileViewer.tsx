@@ -11,6 +11,7 @@ import {
   Download,
   FileSpreadsheet,
   FileText,
+  GitCompareArrows,
   Link2,
   Link2Off,
   MessageSquare,
@@ -19,18 +20,29 @@ import {
   X,
 } from "lucide-react";
 
-import { CommentCard, type Outcome } from "@/components/viewer/CommentCard";
+import { CommentCard } from "@/components/viewer/CommentCard";
 import { DocumentPage, type Mark } from "@/components/viewer/DocumentPage";
 import { ExcelPane } from "@/components/viewer/ExcelPane";
 import { Button, Progress, Tooltip, useToast } from "@/components/element";
 import { isReviewed } from "@/lib/derive";
-import { buildIssues, notesForStatement, type Issue, type IssueKind } from "@/lib/issues";
+import {
+  SIDE_META,
+  buildIssues,
+  implicates,
+  notesForStatement,
+  workingValues as buildWorkingValues,
+  type Disagreement,
+  type Issue,
+  type IssueKind,
+} from "@/lib/issues";
 import { statementLabel } from "@/lib/mock";
-import { useStore } from "@/lib/store";
+import { useStore, type Disposition } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import type { Project, StatementId } from "@/lib/types";
 
-type CommentFilter = "open" | "resolved" | "all";
+type CommentFilter = "open" | "closed" | "all";
+
+const SIDE_ORDER: Disagreement[] = ["pdf", "excel", "both"];
 
 const PAGE_ORDER: StatementId[] = ["balance", "income", "cashflow"];
 const KIND_FILTERS: { value: IssueKind | "all"; label: string }[] = [
@@ -52,9 +64,13 @@ export function ReconcileViewer({
   onClose: () => void;
 }) {
   const toast = useToast();
-  const resolved = useStore((s) => s.resolvedComments);
-  const resolveComment = useStore((s) => s.resolveComment);
+  const dispositions = useStore((s) => s.commentDisposition);
+  const disposeComment = useStore((s) => s.disposeComment);
   const reopenComment = useStore((s) => s.reopenComment);
+  const isOpen = React.useCallback(
+    (issue: Issue) => dispositions[issue.id] === undefined,
+    [dispositions]
+  );
 
   const pages = React.useMemo(
     () => PAGE_ORDER.filter((s) => project.statements.includes(s)),
@@ -101,7 +117,8 @@ export function ReconcileViewer({
     return map;
   }, [pageIssues]);
   const textIssues = React.useMemo(() => pageIssues.filter((i) => i.kind === "text"), [pageIssues]);
-  const openIssues = pageIssues.filter((i) => !resolved.includes(i.id));
+  const openIssues = pageIssues.filter(isOpen);
+  const workingValueMap = React.useMemo(() => buildWorkingValues(allIssues), [allIssues]);
 
   /* the agent ticks what it reconciled; the analyst edits from there */
   React.useEffect(() => {
@@ -129,8 +146,9 @@ export function ReconcileViewer({
   const focusIssue = allIssues.find((i) => i.id === focusIssueId);
   React.useEffect(() => {
     if (!focusIssue) return;
-    if (focusIssue.kind === "formula") setReference("B");
-    if (focusIssue.kind === "text") setReference("A");
+    if (focusIssue.side === "excel") setReference("B");
+    else if (focusIssue.side === "pdf") setReference("A");
+    else setReference(focusIssue.kind === "formula" ? "B" : "A");
     if (focusIssue.itemId) setFocusLineId(focusIssue.itemId);
   }, [focusIssue?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -165,8 +183,8 @@ export function ReconcileViewer({
   if (!open) return null;
 
   const reconciledPages = pages.filter((s) => {
-    const rows = project.items.filter((i) => i.statement === s);
-    return rows.length > 0 && rows.every(isReviewed);
+    const rows = allIssues.filter((i) => i.statement === s);
+    return rows.length > 0 && rows.every((i) => !isOpen(i));
   }).length;
 
   const ticked = items.filter((i) => marks[i.id] === "tick").length;
@@ -201,30 +219,31 @@ export function ReconcileViewer({
   };
 
   const visibleIssues = pageIssues
-    .filter((i) =>
-      filter === "all" ? true : filter === "open" ? !resolved.includes(i.id) : resolved.includes(i.id)
-    )
+    .filter((i) => (filter === "all" ? true : filter === "open" ? isOpen(i) : !isOpen(i)))
     .filter((i) => (kind === "all" ? true : i.kind === kind));
 
-  const handleResolve = (issue: Issue, outcome: Outcome) => {
-    resolveComment(issue.id, issue.itemId ?? null, outcome);
-    if (issue.itemId && outcome !== "dismiss") {
-      setMarks((m) => ({ ...m, [issue.itemId!]: "tick" }));
+  /* grouped by the document at fault, so a filing error and a workbook error
+     are never mixed into one undifferentiated list */
+  const groupedIssues = SIDE_ORDER.map((side) => ({
+    side,
+    issues: visibleIssues.filter((i) => i.side === side),
+  })).filter((group) => group.issues.length > 0);
+
+  const handleDispose = (issue: Issue, disposition: Disposition) => {
+    disposeComment(issue.id, issue.itemId ?? null, disposition);
+    if (issue.itemId) {
+      setMarks((m) => ({
+        ...m,
+        [issue.itemId!]: disposition === "flagged" ? "cross" : "tick",
+      }));
     }
     toast(
-      issue.kind === "text"
-        ? outcome === "reference"
-          ? `Reference wording adopted · ${issue.title}`
-          : outcome === "accept"
-            ? `Working wording kept · ${issue.title}`
-            : `Comment dismissed · ${issue.title}`
-        : outcome === "accept"
-          ? issue.kind === "value"
-            ? `Resolved · ${issue.title}`
-            : `Accepted working value · ${issue.title}`
-          : outcome === "reference"
-            ? `Expected formula applied · ${issue.title}`
-            : `Comment dismissed · ${issue.title}`
+      disposition === "resolved"
+        ? `Resolved · ${issue.title}`
+        : disposition === "flagged"
+          ? `Flagged to the preparer · ${SIDE_META[issue.side].short} · ${issue.title}`
+          : `Dismissed · ${issue.title}`,
+      disposition === "flagged" ? "info" : "success"
     );
   };
 
@@ -310,9 +329,7 @@ export function ReconcileViewer({
 
         <div className="flex flex-wrap items-center gap-1.5">
           {pages.map((page, i) => {
-            const openOnPage = allIssues.filter(
-              (x) => x.statement === page && !resolved.includes(x.id)
-            ).length;
+            const openOnPage = allIssues.filter((x) => x.statement === page && isOpen(x)).length;
             return (
               <button
                 key={page}
@@ -373,8 +390,8 @@ export function ReconcileViewer({
                 const doc = id === "A" ? project.docA : project.docB;
                 const isActive = reference === id;
                 const isSheet = doc.kind === "xlsx";
-                const flagged = allIssues.filter(
-                  (i) => i.kind === "formula" && i.statement === statement && !resolved.includes(i.id)
+                const flagged = pageIssues.filter(
+                  (i) => implicates(i, isSheet ? "excel" : "pdf") && isOpen(i)
                 ).length;
                 return (
                   <button
@@ -394,7 +411,7 @@ export function ReconcileViewer({
                       <FileText className="h-3.5 w-3.5 text-[#DC2626]" />
                     )}
                     <span className="max-w-[190px] truncate">{doc.fileName}</span>
-                    {isSheet && flagged > 0 && (
+                    {flagged > 0 && (
                       <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-critical px-1 font-mono text-[10px] text-white">
                         {flagged}
                       </span>
@@ -414,7 +431,7 @@ export function ReconcileViewer({
                 items={project.items}
                 issues={allIssues}
                 issueNumber={issueNumber}
-                resolvedIds={resolved}
+                dispositions={dispositions}
                 focusId={focusIssueId}
                 hoveredItemId={hoveredItemId}
                 onHover={setHoveredItemId}
@@ -438,7 +455,8 @@ export function ReconcileViewer({
                   issueByItem={issueByItem}
                   textIssues={textIssues}
                   issueNumber={issueNumber}
-                  resolvedIds={resolved}
+                  dispositions={dispositions}
+                  workingValues={workingValueMap}
                   focusIssueId={focusIssueId}
                   focusItemId={focusLineId}
                   hoveredItemId={hoveredItemId}
@@ -486,7 +504,8 @@ export function ReconcileViewer({
                 issueByItem={issueByItem}
                 textIssues={textIssues}
                 issueNumber={issueNumber}
-                resolvedIds={resolved}
+                dispositions={dispositions}
+                workingValues={workingValueMap}
                 focusIssueId={focusIssueId}
                 focusItemId={focusLineId}
                 hoveredItemId={hoveredItemId}
@@ -514,7 +533,7 @@ export function ReconcileViewer({
                     <MessageSquare className="h-4 w-4 text-muted-foreground" />
                     <span className="text-body font-medium">Comments</span>
                     <span className="ml-auto tabular font-mono text-helper text-muted-foreground">
-                      {pageIssues.length - openIssues.length}/{pageIssues.length} resolved
+                      {pageIssues.length - openIssues.length}/{pageIssues.length} closed
                     </span>
                   </div>
                   <Progress
@@ -532,7 +551,7 @@ export function ReconcileViewer({
                     {(
                       [
                         ["open", `Open ${openIssues.length}`],
-                        ["resolved", `Resolved ${pageIssues.length - openIssues.length}`],
+                        ["closed", `Closed ${pageIssues.length - openIssues.length}`],
                         ["all", "All"],
                       ] as [CommentFilter, string][]
                     ).map(([value, label]) => (
@@ -595,24 +614,60 @@ export function ReconcileViewer({
                       </p>
                     </div>
                   ) : (
-                    <ul className="flex flex-col gap-2">
-                      {visibleIssues.map((issue) => (
-                        <CommentCard
-                          key={issue.id}
-                          issue={issue}
-                          item={project.items.find((i) => i.id === issue.itemId)}
-                          project={project}
-                          number={issueNumber.get(issue.id) ?? 0}
-                          resolved={resolved.includes(issue.id)}
-                          focused={focusIssueId === issue.id}
-                          hovered={Boolean(issue.itemId && issue.itemId === hoveredItemId)}
-                          onFocus={() => setFocusIssueId(issue.id)}
-                          onHover={setHoveredItemId}
-                          onResolve={(outcome) => handleResolve(issue, outcome)}
-                          onReopen={() => reopenComment(issue.id)}
-                        />
-                      ))}
-                    </ul>
+                    <div className="flex flex-col gap-3">
+                      {groupedIssues.map((group) => {
+                        const meta = SIDE_META[group.side];
+                        const openInGroup = group.issues.filter(isOpen).length;
+                        return (
+                          <section key={group.side} className="flex flex-col gap-1.5">
+                            <header className="flex items-center gap-1.5 px-0.5">
+                              <span
+                                className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-meta font-semibold uppercase tracking-wider"
+                                style={{ background: meta.tint, color: meta.fg }}
+                              >
+                                {group.side === "pdf" ? (
+                                  <FileText className="h-2.5 w-2.5" />
+                                ) : group.side === "excel" ? (
+                                  <FileSpreadsheet className="h-2.5 w-2.5" />
+                                ) : (
+                                  <GitCompareArrows className="h-2.5 w-2.5" />
+                                )}
+                                {meta.label}
+                              </span>
+                              <span className="tabular font-mono text-meta text-muted-foreground">
+                                {openInGroup} open · {group.issues.length}
+                              </span>
+                              <span className="ml-auto text-meta text-muted-foreground">
+                                {group.side === "pdf"
+                                  ? project.docA.label
+                                  : group.side === "excel"
+                                    ? project.docB.label
+                                    : "both sources"}
+                              </span>
+                            </header>
+
+                            <ul className="flex flex-col gap-2">
+                              {group.issues.map((issue) => (
+                                <CommentCard
+                                  key={issue.id}
+                                  issue={issue}
+                                  item={project.items.find((i) => i.id === issue.itemId)}
+                                  project={project}
+                                  number={issueNumber.get(issue.id) ?? 0}
+                                  disposition={dispositions[issue.id]}
+                                  focused={focusIssueId === issue.id}
+                                  hovered={Boolean(issue.itemId && issue.itemId === hoveredItemId)}
+                                  onFocus={() => setFocusIssueId(issue.id)}
+                                  onHover={setHoveredItemId}
+                                  onDispose={(disposition) => handleDispose(issue, disposition)}
+                                  onReopen={() => reopenComment(issue.id)}
+                                />
+                              ))}
+                            </ul>
+                          </section>
+                        );
+                      })}
+                    </div>
                   )}
                 </div>
 

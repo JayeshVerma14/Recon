@@ -1,12 +1,13 @@
 "use client";
 
 import * as React from "react";
-import { Check, X } from "lucide-react";
+import { Check, Minus, X } from "lucide-react";
 
 import { effectiveValue, formatValue } from "@/lib/derive";
 import { statementLabel } from "@/lib/mock";
 import { cn } from "@/lib/utils";
-import type { DocNote, Issue } from "@/lib/issues";
+import { implicates, type DocNote, type Issue } from "@/lib/issues";
+import type { Disposition } from "@/lib/store";
 import type { LineItem, Project, StatementId } from "@/lib/types";
 
 export type Mark = "tick" | "cross";
@@ -22,7 +23,8 @@ export function DocumentPage({
   issueByItem,
   textIssues,
   issueNumber,
-  resolvedIds,
+  dispositions,
+  workingValues,
   focusIssueId,
   focusItemId,
   hoveredItemId,
@@ -40,7 +42,9 @@ export function DocumentPage({
   issueByItem: Map<string, Issue>;
   textIssues: Issue[];
   issueNumber: Map<string, number>;
-  resolvedIds: string[];
+  dispositions: Record<string, Disposition>;
+  /** The figure the reconciled document reports, where it differs from the model. */
+  workingValues: Map<string, number>;
   focusIssueId: string | null;
   focusItemId: string | null;
   hoveredItemId: string | null;
@@ -54,7 +58,11 @@ export function DocumentPage({
     focusRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
   }, [focusIssueId, focusItemId, statement]);
 
-  const value = (item: LineItem) => (variant === "working" ? effectiveValue(item) : item.valueA);
+  const value = (item: LineItem) => {
+    if (variant === "working") return workingValues.get(item.id) ?? effectiveValue(item);
+    const issue = issueByItem.get(item.id);
+    return issue?.pdfValue ?? item.valueA;
+  };
   const prior = (item: LineItem) =>
     variant === "working" ? item.valueA : Math.round(item.valueA * 0.93);
 
@@ -88,8 +96,10 @@ export function DocumentPage({
           {items.map((item) => {
             const mark = marks[item.id];
             const issue = issueByItem.get(item.id);
-            const number = issue ? issueNumber.get(issue.id) : undefined;
-            const isResolved = issue ? resolvedIds.includes(issue.id) : false;
+            /* the filing is only marked where the filing itself is implicated */
+            const shows = issue !== undefined && (variant === "working" || implicates(issue, "pdf"));
+            const number = shows ? issueNumber.get(issue!.id) : undefined;
+            const disposition = issue ? dispositions[issue.id] : undefined;
             const focused =
               item.id === focusItemId || (issue !== undefined && issue.id === focusIssueId);
             const linked = item.id === hoveredItemId;
@@ -136,11 +146,17 @@ export function DocumentPage({
                       }}
                       className={cn(
                         "ml-1 inline-flex h-3.5 w-3.5 -translate-y-0.5 items-center justify-center rounded-full align-middle text-[8px] font-semibold text-white",
-                        isResolved ? "bg-[#179864]" : "bg-critical",
+                        BADGE_BG[disposition ?? "open"],
                         issue?.id === focusIssueId && "ring-2 ring-[#E0A800]"
                       )}
                     >
-                      {isResolved ? <Check className="h-2 w-2" strokeWidth={4} /> : number}
+                      {disposition === "resolved" ? (
+                        <Check className="h-2 w-2" strokeWidth={4} />
+                      ) : disposition === "dismissed" ? (
+                        <Minus className="h-2 w-2" strokeWidth={4} />
+                      ) : (
+                        number
+                      )}
                     </button>
                   )}
                 </td>
@@ -165,7 +181,7 @@ export function DocumentPage({
             {notes.map((note) => {
               const issue = textIssues.find((t) => t.noteId === note.id);
               const number = issue ? issueNumber.get(issue.id) : undefined;
-              const isResolved = issue ? resolvedIds.includes(issue.id) : false;
+              const disposition = issue ? dispositions[issue.id] : undefined;
               const focused = issue?.id === focusIssueId;
 
               const body = variant === "working" ? note.body : (note.referenceBody ?? note.body);
@@ -188,7 +204,9 @@ export function DocumentPage({
                   {missingHere ? (
                     <p className="flex items-start gap-1.5 rounded-sm border border-dashed border-[#DC2626]/50 bg-[rgba(220,38,38,0.05)] px-2 py-1.5 text-[10px] italic text-[#B91C1C]">
                       <span className="flex-1">Passage not found on this document.</span>
-                      {number !== undefined && <NumberBadge n={number} resolved={isResolved} focused={focused} />}
+                      {number !== undefined && (
+                        <NumberBadge n={number} disposition={disposition} focused={focused} />
+                      )}
                     </p>
                   ) : (
                     <p className="text-[10px] leading-[15px] text-[#1B2733]">
@@ -196,7 +214,7 @@ export function DocumentPage({
                         text={body}
                         span={span}
                         number={number}
-                        resolved={isResolved}
+                        disposition={disposition}
                         focused={focused}
                       />
                     </p>
@@ -221,15 +239,16 @@ function HighlightedText({
   text,
   span,
   number,
-  resolved,
+  disposition,
   focused,
 }: {
   text: string;
   span?: string;
   number?: number;
-  resolved: boolean;
+  disposition?: Disposition;
   focused?: boolean;
 }) {
+  const closed = disposition !== undefined;
   if (!span || !text.includes(span)) return <>{text}</>;
 
   const [before, ...rest] = text.split(span);
@@ -241,16 +260,20 @@ function HighlightedText({
       <mark
         className={cn(
           "rounded-[2px] px-0.5 py-[1px] transition-colors",
-          resolved
-            ? "bg-[rgba(23,152,100,0.16)] text-[#0F7048] ring-1 ring-[#179864]/40"
+          closed
+            ? disposition === "resolved"
+              ? "bg-[rgba(23,152,100,0.16)] text-[#0F7048] ring-1 ring-[#179864]/40"
+              : disposition === "flagged"
+                ? "bg-[rgba(245,158,11,0.20)] text-[#B45309] ring-1 ring-[#F59E0B]/50"
+                : "bg-[rgba(148,163,184,0.18)] text-[#5A6672] ring-1 ring-[#94A3B8]/40"
             : "bg-[rgba(245,196,49,0.40)] text-[#1B2733] ring-1 ring-[#E0A800]",
-          focused && !resolved && "bg-[rgba(245,196,49,0.65)] ring-2"
+          focused && !closed && "bg-[rgba(245,196,49,0.65)] ring-2"
         )}
       >
         {span}
         {number !== undefined && (
           <span className="ml-1 align-middle">
-            <NumberBadge n={number} resolved={resolved} focused={focused} />
+            <NumberBadge n={number} disposition={disposition} focused={focused} />
           </span>
         )}
       </mark>
@@ -259,24 +282,37 @@ function HighlightedText({
   );
 }
 
+const BADGE_BG: Record<Disposition | "open", string> = {
+  open: "bg-critical",
+  resolved: "bg-[#179864]",
+  flagged: "bg-[#F59E0B]",
+  dismissed: "bg-[#94A3B8]",
+};
+
 function NumberBadge({
   n,
-  resolved,
+  disposition,
   focused,
 }: {
   n: number;
-  resolved: boolean;
+  disposition?: Disposition;
   focused?: boolean;
 }) {
   return (
     <span
       className={cn(
         "inline-flex h-3.5 w-3.5 items-center justify-center rounded-full text-[8px] font-semibold text-white",
-        resolved ? "bg-[#179864]" : "bg-critical",
+        BADGE_BG[disposition ?? "open"],
         focused && "ring-2 ring-[#E0A800]"
       )}
     >
-      {resolved ? <Check className="h-2 w-2" strokeWidth={4} /> : n}
+      {disposition === "resolved" ? (
+        <Check className="h-2 w-2" strokeWidth={4} />
+      ) : disposition === "dismissed" ? (
+        <Minus className="h-2 w-2" strokeWidth={4} />
+      ) : (
+        n
+      )}
     </span>
   );
 }
