@@ -3,6 +3,7 @@
 import * as React from "react";
 import {
   Check,
+  ChevronDown,
   CornerUpLeft,
   FileSpreadsheet,
   FileText,
@@ -16,7 +17,7 @@ import {
 import { Button, Tooltip } from "@/components/element";
 import { formatDifference, formatValue } from "@/lib/derive";
 import { statementLabel } from "@/lib/mock";
-import { SIDE_META, wordDiff, type Issue } from "@/lib/issues";
+import { SHAPE_META, SIDE_META, wordDiff, type Issue } from "@/lib/issues";
 import type { Disposition } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import type { LineItem, Project } from "@/lib/types";
@@ -68,8 +69,9 @@ export function CommentCard({
   onReopen: () => void;
 }) {
   const meta = KIND_META[issue.kind];
-  const side = SIDE_META[issue.side];
-  const SideIcon = SIDE_ICON[issue.side];
+  const shape = SHAPE_META[issue.shape];
+  const ShapeIcon = issue.shape === "single" ? Flag : issue.shape === "consensus" ? Sigma : GitCompareArrows;
+  const outlierNames = issue.readings.filter((r) => !r.agrees).map((r) => r.label);
   const closed = disposition !== undefined;
 
   return (
@@ -99,10 +101,13 @@ export function CommentCard({
           <div className="flex flex-wrap items-center gap-1">
             <span
               className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-meta font-semibold uppercase tracking-wider"
-              style={{ background: side.tint, color: side.fg }}
+              style={{ background: shape.tint, color: shape.fg }}
+              title={shape.hint}
             >
-              <SideIcon className="h-2.5 w-2.5" />
-              {side.label}
+              <ShapeIcon className="h-2.5 w-2.5" />
+              {issue.shape === "single" && outlierNames.length === 1
+                ? `${outlierNames[0]} is out`
+                : shape.label}
             </span>
             <span className="inline-flex items-center gap-1 text-meta uppercase tracking-wider text-muted-foreground">
               <meta.icon className={cn("h-3 w-3", meta.className)} />
@@ -186,9 +191,11 @@ export function CommentCard({
 
           <Tooltip
             content={
-              issue.side === "both"
-                ? "Send back to the preparer — the sources need to be brought into line"
-                : `Send back to the preparer — ${SIDE_META[issue.side].short.toLowerCase()} needs correcting`
+              outlierNames.length === 1
+                ? `Send back to the preparer — ${outlierNames[0]} needs correcting`
+                : outlierNames.length > 1
+                  ? `Send back to the preparer — ${outlierNames.join(", ")} need bringing into line`
+                  : "Send back to the preparer — the sources need to be brought into line"
             }
           >
             <span>
@@ -230,6 +237,11 @@ export function CommentCard({
  * All three figures at once, with a verdict against each source — so the odd
  * one out is visible without arithmetic.
  */
+/**
+ * Every source read against the reconciled figure. Outliers are listed; the
+ * sources that agree collapse into a single line, because at five or fifteen
+ * sources the interesting fact is who is out, not who is in.
+ */
 function SourceLedger({
   issue,
   item,
@@ -239,102 +251,102 @@ function SourceLedger({
   item: LineItem;
   project: Project;
 }) {
-  const working = issue.workingValue ?? item.valueB;
-  const pdf = issue.pdfValue ?? item.valueA;
-  const excel = issue.excelValue ?? item.valueB;
+  const [expanded, setExpanded] = React.useState(false);
 
-  const rows = [
-    {
-      key: "working",
-      label: "Reconciled",
-      icon: null,
-      value: working,
-      delta: null as number | null,
-      agrees: true,
-      primary: true,
-    },
-    {
-      key: "pdf",
-      label: project.docA.label,
-      icon: FileText,
-      value: pdf,
-      delta: Number((pdf - working).toFixed(2)),
-      agrees: pdf === working,
-      primary: false,
-    },
-    {
-      key: "excel",
-      label: project.docB.label,
-      icon: FileSpreadsheet,
-      value: excel,
-      delta: Number((excel - working).toFixed(2)),
-      agrees: excel === working,
-      primary: false,
-    },
-  ];
+  const working = issue.workingValue ?? item.valueB;
+  const outliers = issue.readings.filter((r) => !r.agrees);
+  const agreeing = issue.readings.filter((r) => r.agrees);
+
+  /* how far apart the sources are from each other, not from the output */
+  const distinct = Array.from(new Set(issue.readings.map((r) => r.value ?? working)));
+  const spread =
+    distinct.length > 1 ? Math.max(...distinct) - Math.min(...distinct) : 0;
 
   return (
     <div className="overflow-hidden rounded-md border border-border-subtle">
-      {rows.map((row, i) => (
+      <div className="flex items-center gap-2 bg-surface-secondary/70 px-2.5 py-1.5">
+        <span className="truncate text-meta font-semibold uppercase tracking-wider text-foreground">
+          Reconciled
+        </span>
+        <span className="tabular ml-auto font-mono text-body-sm font-medium">
+          {formatValue(working, item.unit)}
+        </span>
+      </div>
+
+      {outliers.map((row) => (
         <div
-          key={row.key}
-          className={cn(
-            "flex items-center gap-2 px-2.5 py-1.5",
-            i > 0 && "border-t border-border-subtle",
-            row.primary && "bg-surface-secondary/70",
-            !row.primary && !row.agrees && "bg-[rgba(220,38,38,0.05)]"
-          )}
+          key={row.docId}
+          className="flex items-center gap-2 border-t border-border-subtle bg-[rgba(220,38,38,0.05)] px-2.5 py-1.5"
         >
           <span className="flex min-w-0 items-center gap-1.5">
-            {row.icon && (
-              <row.icon
-                className={cn("h-3 w-3 shrink-0", row.agrees ? "text-muted-foreground" : "text-critical")}
-              />
+            {row.kind === "pdf" ? (
+              <FileText className="h-3 w-3 shrink-0 text-critical" />
+            ) : (
+              <FileSpreadsheet className="h-3 w-3 shrink-0 text-critical" />
             )}
-            <span
-              className={cn(
-                "truncate text-meta uppercase tracking-wider",
-                row.primary ? "font-semibold text-foreground" : "text-muted-foreground"
-              )}
-            >
+            <span className="truncate text-meta uppercase tracking-wider text-muted-foreground">
               {row.label}
             </span>
           </span>
-
           <span className="ml-auto flex shrink-0 items-center gap-1.5">
-            {!row.primary &&
-              (row.agrees ? (
-                <span className="inline-flex items-center gap-0.5 text-meta text-success">
-                  <Check className="h-3 w-3" strokeWidth={3} />
-                  agrees
-                </span>
-              ) : (
-                <span className="tabular font-mono text-meta text-critical">
-                  {formatDifference(row.delta ?? 0, item.unit)}
-                </span>
-              ))}
-            <span
-              className={cn(
-                "tabular font-mono text-body-sm",
-                row.primary && "font-medium",
-                !row.primary && !row.agrees && "text-critical"
-              )}
-            >
-              {formatValue(row.value, item.unit)}
+            <span className="tabular font-mono text-meta text-critical">
+              {formatDifference(row.delta, item.unit)}
+            </span>
+            <span className="tabular font-mono text-body-sm text-critical">
+              {formatValue(row.value ?? working, item.unit)}
             </span>
           </span>
         </div>
       ))}
 
-      {/* neither source is presumed right — say how far apart they are */}
-      {issue.side === "both" && pdf !== excel && (
+      {agreeing.length > 0 && (
+        <>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setExpanded((v) => !v);
+            }}
+            className="flex w-full items-center gap-2 border-t border-border-subtle px-2.5 py-1.5 text-left transition-colors duration-fast hover:bg-surface-secondary/60"
+          >
+            <Check className="h-3 w-3 shrink-0 text-success" strokeWidth={3} />
+            <span className="text-meta uppercase tracking-wider text-success">
+              {agreeing.length} {agreeing.length === 1 ? "source agrees" : "sources agree"}
+            </span>
+            <ChevronDown
+              className={cn(
+                "ml-auto h-3 w-3 shrink-0 text-muted-foreground transition-transform duration-fast",
+                expanded && "rotate-180"
+              )}
+            />
+          </button>
+
+          {expanded &&
+            agreeing.map((row) => (
+              <div
+                key={row.docId}
+                className="flex items-center gap-2 border-t border-border-subtle px-2.5 py-1 pl-7"
+              >
+                <span className="truncate text-meta uppercase tracking-wider text-muted-foreground">
+                  {row.label}
+                </span>
+                <span className="tabular ml-auto font-mono text-helper text-muted-foreground">
+                  {formatValue(row.value ?? working, item.unit)}
+                </span>
+              </div>
+            ))}
+        </>
+      )}
+
+      {/* no source is presumed right — say how far apart they are */}
+      {spread > 0 && outliers.length > 0 && (
         <div className="flex items-center gap-2 border-t border-border-subtle bg-[rgba(139,92,246,0.06)] px-2.5 py-1.5">
           <GitCompareArrows className="h-3 w-3 shrink-0 text-[#6D28D9]" />
           <span className="text-meta uppercase tracking-wider text-[#6D28D9]">
-            Sources differ by
+            {distinct.length} distinct values · spread
           </span>
           <span className="tabular ml-auto font-mono text-body-sm text-[#6D28D9]">
-            {formatValue(Math.abs(pdf - excel), item.unit)}
+            {formatValue(spread, item.unit)}
           </span>
         </div>
       )}

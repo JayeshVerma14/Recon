@@ -1,5 +1,5 @@
 import { difference } from "@/lib/derive";
-import type { LineItem, Project, StatementId } from "@/lib/types";
+import type { DocumentMeta, LineItem, Project, StatementId } from "@/lib/types";
 
 /**
  * Three things can disagree between two filings: a number, a word, or the
@@ -16,6 +16,51 @@ export type IssueKind = "value" | "text" | "formula";
  */
 export type Disagreement = "pdf" | "excel" | "both";
 
+/** One source's reading of a reconciled line. */
+export interface SourceReading {
+  docId: string;
+  label: string;
+  kind: "pdf" | "xlsx";
+  /** Absent when the source does not carry this line at all. */
+  value?: number;
+  covered: boolean;
+  agrees: boolean;
+  /** Signed difference against the reconciled figure. */
+  delta: number;
+}
+
+/**
+ * The shape of a disagreement, which is what decides how it gets worked:
+ * one source out is a correction to raise; a split needs a judgement; and a
+ * unanimous set that still differs from the reconciled figure is the agent's
+ * own extraction error.
+ */
+export type DisagreementShape = "single" | "split" | "consensus";
+
+export const SHAPE_META: Record<
+  DisagreementShape,
+  { label: string; hint: string; tint: string; fg: string }
+> = {
+  single: {
+    label: "One source out",
+    hint: "every other source agrees",
+    tint: "rgba(245,158,11,0.14)",
+    fg: "#B45309",
+  },
+  split: {
+    label: "Sources split",
+    hint: "no majority — needs a decision",
+    tint: "rgba(139,92,246,0.12)",
+    fg: "#6D28D9",
+  },
+  consensus: {
+    label: "Sources agree, reconciled differs",
+    hint: "extraction to check",
+    tint: "rgba(220,38,38,0.10)",
+    fg: "#B91C1C",
+  },
+};
+
 export interface Issue {
   id: string;
   kind: IssueKind;
@@ -25,6 +70,13 @@ export interface Issue {
   title: string;
   explanation: string;
   confidence: number;
+
+  /** How the sources fall out against each other. */
+  shape: DisagreementShape;
+  /** Every source's reading, outliers first. */
+  readings: SourceReading[];
+  /** Ids of the sources that disagree with the reconciled figure. */
+  disagreeing: string[];
 
   /** value + formula issues are anchored to a reconciled line. */
   itemId?: string;
@@ -321,7 +373,7 @@ const SINGLE_SOURCE_ISSUES: {
   id: string;
   itemId: string;
   statement: StatementId;
-  side: Exclude<Disagreement, "both">;
+  side: Disagreement;
   working: number;
   pdf: number;
   excel: number;
@@ -377,6 +429,19 @@ const SINGLE_SOURCE_ISSUES: {
     confidence: 86,
   },
   {
+    /* nobody disagrees with anybody — the reconciled figure is the one that is out */
+    id: "src-cf-0",
+    itemId: "cashflow-02",
+    statement: "cashflow",
+    side: "both",
+    working: 4010,
+    pdf: 4100,
+    excel: 4100,
+    explanation:
+      "All five sources report 4,100 and the reconciled statement carries 4,010. Nothing disagrees except the extraction — re-read this line before signing the page off.",
+    confidence: 68,
+  },
+  {
     id: "src-cf-1",
     itemId: "cashflow-03",
     statement: "cashflow",
@@ -390,7 +455,124 @@ const SINGLE_SOURCE_ISSUES: {
   },
 ];
 
+
+/* ------------------------------- more sources ------------------------------ */
+
+/**
+ * A reconciliation is rarely two documents. These sit alongside the primary
+ * pair and are read the same way — the point of the model is that no source is
+ * privileged except the reconciled output itself.
+ */
+export const EXTRA_SOURCES: DocumentMeta[] = [
+  {
+    id: "C",
+    fileName: "10-K_2023.pdf",
+    kind: "pdf",
+    sizeMb: 15.9,
+    pages: 186,
+    label: "Prior-year 10-K",
+  },
+  {
+    id: "D",
+    fileName: "Trial_Balance_Q4.xlsx",
+    kind: "xlsx",
+    sizeMb: 2.1,
+    sheets: ["TB_Q4", "Mapping", "Adjustments"],
+    label: "Trial balance",
+  },
+  {
+    id: "E",
+    fileName: "Board_Pack_Dec.pdf",
+    kind: "pdf",
+    sizeMb: 9.4,
+    pages: 64,
+    label: "Board pack",
+  },
+];
+
+/**
+ * Where a further source departs from the reconciled figure. Anything not
+ * listed here reads the same as the reconciled statement — which is the normal
+ * case, and the reason the card collapses agreement rather than listing it.
+ */
+const EXTRA_READINGS: { docId: string; itemId: string; value: number }[] = [
+  /* the trial balance is systematically out on opex — a mapping error */
+  { docId: "D", itemId: "income-06", value: 9860 },
+  { docId: "D", itemId: "income-07", value: 6280 },
+  { docId: "D", itemId: "income-09", value: 21940 },
+  /* the prior-year filing carries the pre-restatement tax charge */
+  { docId: "C", itemId: "income-16", value: 6250 },
+  /* the board pack rounds to the nearest hundred */
+  { docId: "E", itemId: "income-03", value: 125000 },
+  { docId: "E", itemId: "balance-01", value: 18400 },
+  /* three-way split on receivables: every source has its own number */
+  { docId: "C", itemId: "balance-03", value: 22750 },
+  { docId: "D", itemId: "balance-03", value: 22820 },
+  /* the whole set agrees, and the reconciled figure is the odd one out */
+  { docId: "C", itemId: "cashflow-02", value: 4100 },
+  { docId: "D", itemId: "cashflow-02", value: 4100 },
+  { docId: "E", itemId: "cashflow-02", value: 4100 },
+  /* board pack is stale on closing cash */
+  { docId: "E", itemId: "cashflow-21", value: 18400 },
+];
+
+/** Every source in the reconciliation, primary pair first. */
+export function documentsOf(project: Project): DocumentMeta[] {
+  return [project.docA, project.docB, ...(project.extraDocs ?? EXTRA_SOURCES)];
+}
+
 /* --------------------------------- builder --------------------------------- */
+
+/**
+ * Reads every source against the reconciled figure and classifies the result.
+ * A source that carries the same number simply "agrees" — that is the common
+ * case, and the card collapses it rather than listing it.
+ */
+function readSources(
+  project: Project,
+  item: LineItem,
+  working: number,
+  primary: { pdf: number; excel: number }
+): { readings: SourceReading[]; disagreeing: string[]; shape: DisagreementShape } {
+  const docs = documentsOf(project);
+
+  const readings: SourceReading[] = docs.map((doc) => {
+    const override = EXTRA_READINGS.find((r) => r.docId === doc.id && r.itemId === item.id);
+    const value =
+      doc.id === "A"
+        ? primary.pdf
+        : doc.id === "B"
+          ? primary.excel
+          : (override?.value ?? working);
+
+    const delta = Number((value - working).toFixed(2));
+    return {
+      docId: doc.id,
+      label: doc.label,
+      kind: doc.kind,
+      value,
+      covered: true,
+      agrees: delta === 0,
+      delta,
+    };
+  });
+
+  const disagreeing = readings.filter((r) => !r.agrees).map((r) => r.docId);
+
+  /* every source lands on the same number, and it is not the reconciled one */
+  const values = readings.map((r) => r.value ?? working);
+  const unanimous = values.every((v) => v === values[0]);
+  const shape: DisagreementShape = unanimous
+    ? "consensus"
+    : disagreeing.length === 1
+      ? "single"
+      : "split";
+
+  /* outliers first, largest first — the agreeing tail collapses in the card */
+  readings.sort((a, b) => Number(a.agrees) - Number(b.agrees) || Math.abs(b.delta) - Math.abs(a.delta));
+
+  return { readings, disagreeing, shape };
+}
 
 export function buildIssues(project: Project): Issue[] {
   const byId = new Map(project.items.map((i) => [i.id, i]));
@@ -399,42 +581,56 @@ export function buildIssues(project: Project): Issue[] {
     ...SINGLE_SOURCE_ISSUES.map((f) => f.itemId),
   ]);
 
-  /* the two sources disagree with each other */
+  /* the primary pair disagree with each other */
   const valueIssues: Issue[] = project.items
     .filter((item) => item.explanation && !claimed.has(item.id))
-    .map((item) => ({
-      id: `val-${item.id}`,
-      kind: "value" as const,
-      side: "both" as const,
-      statement: item.statement,
-      title: item.account,
-      explanation: item.explanation!,
-      confidence: item.confidence,
-      itemId: item.id,
-      workingValue: item.valueB,
-      pdfValue: item.valueA,
-      excelValue: item.valueB,
-    }));
+    .map((item) => {
+      const read = readSources(project, item, item.valueB, {
+        pdf: item.valueA,
+        excel: item.valueB,
+      });
+      return {
+        id: `val-${item.id}`,
+        kind: "value" as const,
+        side: "both" as const,
+        statement: item.statement,
+        title: item.account,
+        explanation: item.explanation!,
+        confidence: item.confidence,
+        itemId: item.id,
+        workingValue: item.valueB,
+        pdfValue: item.valueA,
+        excelValue: item.valueB,
+        ...read,
+      };
+    });
 
-  /* exactly one source is out */
+  /* exactly one of the primary pair is out */
   const singleSourceIssues: Issue[] = SINGLE_SOURCE_ISSUES.filter((f) => byId.has(f.itemId)).map(
-    (f) => ({
-      id: f.id,
-      kind: "value" as const,
-      side: f.side,
-      statement: f.statement,
-      title: byId.get(f.itemId)!.account,
-      explanation: f.explanation,
-      confidence: f.confidence,
-      itemId: f.itemId,
-      workingValue: f.working,
-      pdfValue: f.pdf,
-      excelValue: f.excel,
-    })
+    (f) => {
+      const item = byId.get(f.itemId)!;
+      const read = readSources(project, item, f.working, { pdf: f.pdf, excel: f.excel });
+      return {
+        id: f.id,
+        kind: "value" as const,
+        side: f.side,
+        statement: f.statement,
+        title: item.account,
+        explanation: f.explanation,
+        confidence: f.confidence,
+        itemId: f.itemId,
+        workingValue: f.working,
+        pdfValue: f.pdf,
+        excelValue: f.excel,
+        ...read,
+      };
+    }
   );
 
   const formulaIssues: Issue[] = FORMULA_ISSUES.filter((f) => byId.has(f.itemId)).map((f) => {
     const item = byId.get(f.itemId)!;
+    const working = f.side === "excel" ? item.valueA : item.valueB;
+    const read = readSources(project, item, working, { pdf: item.valueA, excel: item.valueB });
     return {
       id: f.id,
       kind: "formula" as const,
@@ -444,7 +640,7 @@ export function buildIssues(project: Project): Issue[] {
       explanation: f.explanation,
       confidence: f.confidence,
       itemId: f.itemId,
-      workingValue: f.side === "excel" ? item.valueA : item.valueB,
+      workingValue: working,
       pdfValue: item.valueA,
       excelValue: item.valueB,
       sheet: f.sheet,
@@ -452,13 +648,54 @@ export function buildIssues(project: Project): Issue[] {
       formula: f.formula,
       expectedFormula: f.expectedFormula,
       defect: f.defect,
+      ...read,
     };
   });
+
+  /* a further source disagrees on a line the primary pair agreed on */
+  const extraOnly: Issue[] = (project.items
+    .filter((item) => !claimed.has(item.id) && !item.explanation)
+    .map((item): Issue | null => {
+      const overrides = EXTRA_READINGS.filter((r) => r.itemId === item.id);
+      if (!overrides.length) return null;
+      const read = readSources(project, item, item.valueB, {
+        pdf: item.valueA,
+        excel: item.valueB,
+      });
+      if (!read.disagreeing.length) return null;
+
+      const names = read.readings
+        .filter((r) => !r.agrees)
+        .map((r) => r.label)
+        .join(" and ");
+      return {
+        id: `ext-${item.id}`,
+        kind: "value" as const,
+        side: "both" as const,
+        statement: item.statement,
+        title: item.account,
+        explanation:
+          read.shape === "consensus"
+            ? `Every source reports the same figure and the reconciled statement does not. Re-check the extraction for this line.`
+            : `${names} report a different figure from the reconciled statement, which follows ${
+                read.readings.find((r) => r.agrees)?.label ?? "the primary pair"
+              }.`,
+        confidence: item.confidence,
+        itemId: item.id,
+        workingValue: item.valueB,
+        pdfValue: item.valueA,
+        excelValue: item.valueB,
+        ...read,
+      };
+    }) as (Issue | null)[]).filter((x): x is Issue => x !== null);
 
   const textIssues: Issue[] = TEXT_ISSUES.map((t) => ({
     id: t.id,
     kind: "text" as const,
     side: t.side,
+    shape: "split" as const,
+    readings: [],
+    disagreeing: t.side === "pdf" ? ["A"] : ["A", "B"],
     statement: t.statement,
     title: t.title,
     explanation: t.explanation,
@@ -470,7 +707,7 @@ export function buildIssues(project: Project): Issue[] {
   }));
 
   const order: Record<IssueKind, number> = { value: 0, formula: 1, text: 2 };
-  return [...valueIssues, ...singleSourceIssues, ...formulaIssues, ...textIssues].sort(
+  return [...valueIssues, ...singleSourceIssues, ...extraOnly, ...formulaIssues, ...textIssues].sort(
     (a, b) => order[a.kind] - order[b.kind]
   );
 }
@@ -485,8 +722,10 @@ export function workingValues(issues: Issue[]) {
 }
 
 /** Does this finding implicate the given document? */
-export function implicates(issue: Issue, doc: "pdf" | "excel") {
-  return issue.side === "both" || issue.side === doc;
+export function implicates(issue: Issue, doc: string) {
+  if (doc === "pdf") return issue.disagreeing.includes("A");
+  if (doc === "excel") return issue.disagreeing.includes("B");
+  return issue.disagreeing.includes(doc);
 }
 
 export const SIDE_META: Record<

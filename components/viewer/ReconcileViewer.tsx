@@ -8,8 +8,10 @@ import {
   ChevronRight,
   ChevronsLeft,
   ChevronsRight,
+  Columns3,
   Download,
   FileSpreadsheet,
+  Flag,
   FileText,
   GitCompareArrows,
   Link2,
@@ -26,14 +28,17 @@ import { ExcelPane } from "@/components/viewer/ExcelPane";
 import { Button, Progress, Tooltip, useToast } from "@/components/element";
 import { isReviewed } from "@/lib/derive";
 import {
+  SHAPE_META,
   SIDE_META,
   buildIssues,
+  documentsOf,
   implicates,
   notesForStatement,
   workingValues as buildWorkingValues,
-  type Disagreement,
+  type DisagreementShape,
   type Issue,
   type IssueKind,
+  type SourceReading,
 } from "@/lib/issues";
 import { statementLabel } from "@/lib/mock";
 import { useStore, type Disposition } from "@/lib/store";
@@ -42,7 +47,7 @@ import type { Project, StatementId } from "@/lib/types";
 
 type CommentFilter = "open" | "closed" | "all";
 
-const SIDE_ORDER: Disagreement[] = ["pdf", "excel", "both"];
+const SHAPE_ORDER: DisagreementShape[] = ["consensus", "single", "split"];
 
 const PAGE_ORDER: StatementId[] = ["balance", "income", "cashflow"];
 const KIND_FILTERS: { value: IssueKind | "all"; label: string }[] = [
@@ -80,7 +85,9 @@ export function ReconcileViewer({
 
   const [pageIndex, setPageIndex] = React.useState(0);
   const [tool, setTool] = React.useState<Mark>("tick");
-  const [reference, setReference] = React.useState<"A" | "B">("A");
+  const [reference, setReference] = React.useState<string>("A");
+  const [lensDocId, setLensDocId] = React.useState<string | null>(null);
+  const [gutter, setGutter] = React.useState(false);
   const [marks, setMarks] = React.useState<Record<string, Mark>>({});
   const [hoveredItemId, setHoveredItemId] = React.useState<string | null>(null);
   const [focusIssueId, setFocusIssueId] = React.useState<string | null>(null);
@@ -119,6 +126,14 @@ export function ReconcileViewer({
   const textIssues = React.useMemo(() => pageIssues.filter((i) => i.kind === "text"), [pageIssues]);
   const openIssues = pageIssues.filter(isOpen);
   const workingValueMap = React.useMemo(() => buildWorkingValues(allIssues), [allIssues]);
+  const documents = React.useMemo(() => documentsOf(project), [project]);
+  const readingsByItem = React.useMemo(() => {
+    const map = new Map<string, SourceReading[]>();
+    allIssues.forEach((issue) => {
+      if (issue.itemId && issue.readings.length) map.set(issue.itemId, issue.readings);
+    });
+    return map;
+  }, [allIssues]);
 
   /* the agent ticks what it reconciled; the analyst edits from there */
   React.useEffect(() => {
@@ -146,8 +161,8 @@ export function ReconcileViewer({
   const focusIssue = allIssues.find((i) => i.id === focusIssueId);
   React.useEffect(() => {
     if (!focusIssue) return;
-    if (focusIssue.side === "excel") setReference("B");
-    else if (focusIssue.side === "pdf") setReference("A");
+    const firstOutlier = focusIssue.disagreeing[0];
+    if (firstOutlier) setReference(firstOutlier);
     else setReference(focusIssue.kind === "formula" ? "B" : "A");
     if (focusIssue.itemId) setFocusLineId(focusIssue.itemId);
   }, [focusIssue?.id]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -191,7 +206,7 @@ export function ReconcileViewer({
   const crossed = items.filter((i) => marks[i.id] === "cross").length;
   const fadedCount = project.items.filter((i) => i.statement !== statement && marks[i.id]).length;
 
-  const referenceDoc = reference === "A" ? project.docA : project.docB;
+  const referenceDoc = documents.find((d) => d.id === reference) ?? project.docA;
 
   const toggleMark = (id: string) => {
     setFocusLineId(id);
@@ -220,13 +235,14 @@ export function ReconcileViewer({
 
   const visibleIssues = pageIssues
     .filter((i) => (filter === "all" ? true : filter === "open" ? isOpen(i) : !isOpen(i)))
-    .filter((i) => (kind === "all" ? true : i.kind === kind));
+    .filter((i) => (kind === "all" ? true : i.kind === kind))
+    .filter((i) => (lensDocId === null ? true : implicates(i, lensDocId)));
 
   /* grouped by the document at fault, so a filing error and a workbook error
      are never mixed into one undifferentiated list */
-  const groupedIssues = SIDE_ORDER.map((side) => ({
-    side,
-    issues: visibleIssues.filter((i) => i.side === side),
+  const groupedIssues = SHAPE_ORDER.map((shape) => ({
+    shape,
+    issues: visibleIssues.filter((i) => i.shape === shape),
   })).filter((group) => group.issues.length > 0);
 
   const handleDispose = (issue: Issue, disposition: Disposition) => {
@@ -241,7 +257,9 @@ export function ReconcileViewer({
       disposition === "resolved"
         ? `Resolved · ${issue.title}`
         : disposition === "flagged"
-          ? `Flagged to the preparer · ${SIDE_META[issue.side].short} · ${issue.title}`
+          ? `Flagged to the preparer · ${
+              issue.readings.find((r) => !r.agrees)?.label ?? SIDE_META[issue.side].short
+            } · ${issue.title}`
           : `Dismissed · ${issue.title}`,
       disposition === "flagged" ? "info" : "success"
     );
@@ -380,24 +398,104 @@ export function ReconcileViewer({
         </div>
       </div>
 
+      {/* ------------------------------- source lens ------------------------------ */}
+      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border-subtle px-5 py-2">
+        <span className="text-meta uppercase tracking-wider text-muted-foreground">Sources</span>
+
+        <button
+          type="button"
+          onClick={() => setLensDocId(null)}
+          className={cn(
+            "inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-helper transition-colors duration-fast",
+            lensDocId === null
+              ? "border-brand/40 bg-[rgba(70,100,220,0.08)] font-medium text-[#2F45A8]"
+              : "border-border text-muted-foreground hover:bg-surface-secondary"
+          )}
+        >
+          All sources
+          <span className="tabular font-mono">{documents.length}</span>
+        </button>
+
+        {documents.map((doc) => {
+          const openForDoc = pageIssues.filter((i) => implicates(i, doc.id) && isOpen(i)).length;
+          const active = lensDocId === doc.id;
+          return (
+            <button
+              key={doc.id}
+              type="button"
+              title={doc.fileName}
+              onClick={() => {
+                setLensDocId(active ? null : doc.id);
+                if (!active) setReference(doc.id);
+              }}
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-helper transition-colors duration-fast",
+                active
+                  ? "border-brand/40 bg-[rgba(70,100,220,0.08)] font-medium text-[#2F45A8]"
+                  : "border-border text-muted-foreground hover:bg-surface-secondary",
+                lensDocId !== null && !active && "opacity-60"
+              )}
+            >
+              {doc.kind === "xlsx" ? (
+                <FileSpreadsheet className="h-3 w-3 text-[#179864]" />
+              ) : (
+                <FileText className="h-3 w-3 text-[#DC2626]" />
+              )}
+              <span className="max-w-[120px] truncate">{doc.label}</span>
+              {openForDoc > 0 && (
+                <span
+                  className={cn(
+                    "tabular font-mono",
+                    active ? "text-[#2F45A8]" : "text-critical"
+                  )}
+                >
+                  {openForDoc}
+                </span>
+              )}
+            </button>
+          );
+        })}
+
+        <span className="ml-auto flex items-center gap-2">
+          {lensDocId !== null && (
+            <span className="text-meta text-muted-foreground">
+              other sources dimmed, not hidden
+            </span>
+          )}
+          <Tooltip content="Show a per-source agreement strip beside every line">
+            <button
+              type="button"
+              onClick={() => setGutter((v) => !v)}
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-helper transition-colors duration-fast",
+                gutter
+                  ? "border-brand/40 bg-[rgba(70,100,220,0.08)] text-[#2F45A8]"
+                  : "border-border text-muted-foreground hover:bg-surface-secondary"
+              )}
+            >
+              <Columns3 className="h-3.5 w-3.5" />
+              Agreement grid
+            </button>
+          </Tooltip>
+        </span>
+      </div>
+
       {/* --------------------------------- panes --------------------------------- */}
       <div className="flex min-h-0 flex-1 gap-3 p-3">
         <div className="grid min-h-0 min-w-0 flex-1 grid-cols-1 gap-3 lg:grid-cols-2">
           {/* reference — PDF filing or the supporting workbook */}
           <div className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-lg border border-border">
             <div className="flex h-10 shrink-0 items-center gap-1 overflow-x-auto scrollbar-thin border-b border-border-subtle px-2">
-              {(["A", "B"] as const).map((id) => {
-                const doc = id === "A" ? project.docA : project.docB;
-                const isActive = reference === id;
+              {documents.map((doc) => {
+                const isActive = reference === doc.id;
                 const isSheet = doc.kind === "xlsx";
-                const flagged = pageIssues.filter(
-                  (i) => implicates(i, isSheet ? "excel" : "pdf") && isOpen(i)
-                ).length;
+                const flagged = pageIssues.filter((i) => implicates(i, doc.id) && isOpen(i)).length;
                 return (
                   <button
-                    key={id}
+                    key={doc.id}
                     type="button"
-                    onClick={() => setReference(id)}
+                    onClick={() => setReference(doc.id)}
+                    title={doc.fileName}
                     className={cn(
                       "inline-flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-helper transition-colors duration-fast",
                       isActive
@@ -410,7 +508,7 @@ export function ReconcileViewer({
                     ) : (
                       <FileText className="h-3.5 w-3.5 text-[#DC2626]" />
                     )}
-                    <span className="max-w-[190px] truncate">{doc.fileName}</span>
+                    <span className="max-w-[130px] truncate">{doc.label}</span>
                     {flagged > 0 && (
                       <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-critical px-1 font-mono text-[10px] text-white">
                         {flagged}
@@ -457,6 +555,10 @@ export function ReconcileViewer({
                   issueNumber={issueNumber}
                   dispositions={dispositions}
                   workingValues={workingValueMap}
+                  lensDocId={lensDocId}
+                  gutter={false}
+                  documents={documents}
+                  readingsByItem={readingsByItem}
                   focusIssueId={focusIssueId}
                   focusItemId={focusLineId}
                   hoveredItemId={hoveredItemId}
@@ -506,6 +608,10 @@ export function ReconcileViewer({
                 issueNumber={issueNumber}
                 dispositions={dispositions}
                 workingValues={workingValueMap}
+                lensDocId={lensDocId}
+                gutter={gutter}
+                documents={documents}
+                readingsByItem={readingsByItem}
                 focusIssueId={focusIssueId}
                 focusItemId={focusLineId}
                 hoveredItemId={hoveredItemId}
@@ -616,19 +722,19 @@ export function ReconcileViewer({
                   ) : (
                     <div className="flex flex-col gap-3">
                       {groupedIssues.map((group) => {
-                        const meta = SIDE_META[group.side];
+                        const meta = SHAPE_META[group.shape];
                         const openInGroup = group.issues.filter(isOpen).length;
                         return (
-                          <section key={group.side} className="flex flex-col gap-1.5">
+                          <section key={group.shape} className="flex flex-col gap-1.5">
                             <header className="flex items-center gap-1.5 px-0.5">
                               <span
                                 className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-meta font-semibold uppercase tracking-wider"
                                 style={{ background: meta.tint, color: meta.fg }}
                               >
-                                {group.side === "pdf" ? (
+                                {group.shape === "single" ? (
+                                  <Flag className="h-2.5 w-2.5" />
+                                ) : group.shape === "consensus" ? (
                                   <FileText className="h-2.5 w-2.5" />
-                                ) : group.side === "excel" ? (
-                                  <FileSpreadsheet className="h-2.5 w-2.5" />
                                 ) : (
                                   <GitCompareArrows className="h-2.5 w-2.5" />
                                 )}
@@ -637,12 +743,8 @@ export function ReconcileViewer({
                               <span className="tabular font-mono text-meta text-muted-foreground">
                                 {openInGroup} open · {group.issues.length}
                               </span>
-                              <span className="ml-auto text-meta text-muted-foreground">
-                                {group.side === "pdf"
-                                  ? project.docA.label
-                                  : group.side === "excel"
-                                    ? project.docB.label
-                                    : "both sources"}
+                              <span className="ml-auto truncate text-meta text-muted-foreground">
+                                {meta.hint}
                               </span>
                             </header>
 

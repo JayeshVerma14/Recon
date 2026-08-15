@@ -6,7 +6,7 @@ import { Check, Minus, X } from "lucide-react";
 import { effectiveValue, formatValue } from "@/lib/derive";
 import { statementLabel } from "@/lib/mock";
 import { cn } from "@/lib/utils";
-import { implicates, type DocNote, type Issue } from "@/lib/issues";
+import { implicates, type DocNote, type Issue, type SourceReading } from "@/lib/issues";
 import type { Disposition } from "@/lib/store";
 import type { LineItem, Project, StatementId } from "@/lib/types";
 
@@ -25,6 +25,10 @@ export function DocumentPage({
   issueNumber,
   dispositions,
   workingValues,
+  lensDocId,
+  gutter,
+  documents,
+  readingsByItem,
   focusIssueId,
   focusItemId,
   hoveredItemId,
@@ -45,6 +49,12 @@ export function DocumentPage({
   dispositions: Record<string, Disposition>;
   /** The figure the reconciled document reports, where it differs from the model. */
   workingValues: Map<string, number>;
+  /** When set, marks that do not implicate this source are dimmed rather than hidden. */
+  lensDocId: string | null;
+  /** Per-source agreement strip beside each line. */
+  gutter: boolean;
+  documents: { id: string; label: string }[];
+  readingsByItem: Map<string, SourceReading[]>;
   focusIssueId: string | null;
   focusItemId: string | null;
   hoveredItemId: string | null;
@@ -90,6 +100,11 @@ export function DocumentPage({
             <th className="py-1 pl-3 text-right text-[10px] font-semibold text-[#1B2733]">
               September 30, {periods[1].replace(/\D/g, "")}
             </th>
+            {gutter && (
+              <th className="py-1 pl-3 text-right text-[8px] font-medium uppercase tracking-wider text-[#9AA5B1]">
+                Sources
+              </th>
+            )}
           </tr>
         </thead>
         <tbody>
@@ -100,6 +115,8 @@ export function DocumentPage({
             const shows = issue !== undefined && (variant === "working" || implicates(issue, "pdf"));
             const number = shows ? issueNumber.get(issue!.id) : undefined;
             const disposition = issue ? dispositions[issue.id] : undefined;
+            /* focus + context: out-of-lens findings stay on the page, quietened */
+            const inLens = !lensDocId || (issue !== undefined && implicates(issue, lensDocId));
             const focused =
               item.id === focusItemId || (issue !== undefined && issue.id === focusIssueId);
             const linked = item.id === hoveredItemId;
@@ -147,6 +164,7 @@ export function DocumentPage({
                       className={cn(
                         "ml-1 inline-flex h-3.5 w-3.5 -translate-y-0.5 items-center justify-center rounded-full align-middle text-[8px] font-semibold text-white",
                         BADGE_BG[disposition ?? "open"],
+                        !inLens && "opacity-30 saturate-0",
                         issue?.id === focusIssueId && "ring-2 ring-[#E0A800]"
                       )}
                     >
@@ -164,6 +182,16 @@ export function DocumentPage({
                 <td className="py-[3px] pl-3 text-right font-mono text-[10px] tabular-nums text-[#7C8794]">
                   {formatValue(prior(item), item.unit)}
                 </td>
+
+                {gutter && (
+                  <td className="w-[1px] py-[3px] pl-3">
+                    <AgreementStrip
+                      documents={documents}
+                      readings={readingsByItem.get(item.id)}
+                      lensDocId={lensDocId}
+                    />
+                  </td>
+                )}
               </tr>
             );
           })}
@@ -182,6 +210,8 @@ export function DocumentPage({
               const issue = textIssues.find((t) => t.noteId === note.id);
               const number = issue ? issueNumber.get(issue.id) : undefined;
               const disposition = issue ? dispositions[issue.id] : undefined;
+            /* focus + context: out-of-lens findings stay on the page, quietened */
+            const inLens = !lensDocId || (issue !== undefined && implicates(issue, lensDocId));
               const focused = issue?.id === focusIssueId;
 
               const body = variant === "working" ? note.body : (note.referenceBody ?? note.body);
@@ -279,6 +309,43 @@ function HighlightedText({
       </mark>
       {after}
     </>
+  );
+}
+
+/**
+ * One cell per source: filled where that source agrees with the reconciled
+ * figure, hollow red where it does not. Reading down a column shows a document
+ * that is wrong everywhere; reading across a row shows a contested account.
+ */
+function AgreementStrip({
+  documents,
+  readings,
+  lensDocId,
+}: {
+  documents: { id: string; label: string }[];
+  readings?: SourceReading[];
+  lensDocId: string | null;
+}) {
+  return (
+    <span className="flex items-center gap-[2px]">
+      {documents.map((doc) => {
+        const reading = readings?.find((r) => r.docId === doc.id);
+        /* no finding on this line means every source agreed */
+        const agrees = reading ? reading.agrees : true;
+        const dimmed = lensDocId !== null && lensDocId !== doc.id;
+        return (
+          <span
+            key={doc.id}
+            title={`${doc.label} — ${agrees ? "agrees" : "differs"}`}
+            className={cn(
+              "block h-[7px] w-[7px] rounded-[1px]",
+              agrees ? "bg-[#B7DFC9]" : "bg-[#E4746F]",
+              dimmed && "opacity-30"
+            )}
+          />
+        );
+      })}
+    </span>
   );
 }
 
