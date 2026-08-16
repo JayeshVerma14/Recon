@@ -86,7 +86,6 @@ export function ReconcileViewer({
   const [pageIndex, setPageIndex] = React.useState(0);
   const [tool, setTool] = React.useState<Mark>("tick");
   const [reference, setReference] = React.useState<string>("A");
-  const [lensDocId, setLensDocId] = React.useState<string | null>(null);
   const [gutter, setGutter] = React.useState(false);
   const [marks, setMarks] = React.useState<Record<string, Mark>>({});
   const [hoveredItemId, setHoveredItemId] = React.useState<string | null>(null);
@@ -235,8 +234,7 @@ export function ReconcileViewer({
 
   const visibleIssues = pageIssues
     .filter((i) => (filter === "all" ? true : filter === "open" ? isOpen(i) : !isOpen(i)))
-    .filter((i) => (kind === "all" ? true : i.kind === kind))
-    .filter((i) => (lensDocId === null ? true : implicates(i, lensDocId)));
+    .filter((i) => (kind === "all" ? true : i.kind === kind));
 
   /* grouped by the document at fault, so a filing error and a workbook error
      are never mixed into one undifferentiated list */
@@ -387,81 +385,6 @@ export function ReconcileViewer({
               Sync scroll
             </button>
           </Tooltip>
-          <Button
-            variant="ghost"
-            size="iconSm"
-            aria-label={railOpen ? "Hide comments" : "Show comments"}
-            onClick={() => setRailOpen((v) => !v)}
-          >
-            {railOpen ? <PanelRightClose /> : <PanelRightOpen />}
-          </Button>
-        </div>
-      </div>
-
-      {/* ------------------------------- source lens ------------------------------ */}
-      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border-subtle px-5 py-2">
-        <span className="text-meta uppercase tracking-wider text-muted-foreground">Sources</span>
-
-        <button
-          type="button"
-          onClick={() => setLensDocId(null)}
-          className={cn(
-            "inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-helper transition-colors duration-fast",
-            lensDocId === null
-              ? "border-brand/40 bg-[rgba(70,100,220,0.08)] font-medium text-[#2F45A8]"
-              : "border-border text-muted-foreground hover:bg-surface-secondary"
-          )}
-        >
-          All sources
-          <span className="tabular font-mono">{documents.length}</span>
-        </button>
-
-        {documents.map((doc) => {
-          const openForDoc = pageIssues.filter((i) => implicates(i, doc.id) && isOpen(i)).length;
-          const active = lensDocId === doc.id;
-          return (
-            <button
-              key={doc.id}
-              type="button"
-              title={doc.fileName}
-              onClick={() => {
-                setLensDocId(active ? null : doc.id);
-                if (!active) setReference(doc.id);
-              }}
-              className={cn(
-                "inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-helper transition-colors duration-fast",
-                active
-                  ? "border-brand/40 bg-[rgba(70,100,220,0.08)] font-medium text-[#2F45A8]"
-                  : "border-border text-muted-foreground hover:bg-surface-secondary",
-                lensDocId !== null && !active && "opacity-60"
-              )}
-            >
-              {doc.kind === "xlsx" ? (
-                <FileSpreadsheet className="h-3 w-3 text-[#179864]" />
-              ) : (
-                <FileText className="h-3 w-3 text-[#DC2626]" />
-              )}
-              <span className="max-w-[120px] truncate">{doc.label}</span>
-              {openForDoc > 0 && (
-                <span
-                  className={cn(
-                    "tabular font-mono",
-                    active ? "text-[#2F45A8]" : "text-critical"
-                  )}
-                >
-                  {openForDoc}
-                </span>
-              )}
-            </button>
-          );
-        })}
-
-        <span className="ml-auto flex items-center gap-2">
-          {lensDocId !== null && (
-            <span className="text-meta text-muted-foreground">
-              other sources dimmed, not hidden
-            </span>
-          )}
           <Tooltip content="Show a per-source agreement strip beside every line">
             <button
               type="button"
@@ -477,7 +400,15 @@ export function ReconcileViewer({
               Agreement grid
             </button>
           </Tooltip>
-        </span>
+          <Button
+            variant="ghost"
+            size="iconSm"
+            aria-label={railOpen ? "Hide comments" : "Show comments"}
+            onClick={() => setRailOpen((v) => !v)}
+          >
+            {railOpen ? <PanelRightClose /> : <PanelRightOpen />}
+          </Button>
+        </div>
       </div>
 
       {/* --------------------------------- panes --------------------------------- */}
@@ -555,7 +486,7 @@ export function ReconcileViewer({
                   issueNumber={issueNumber}
                   dispositions={dispositions}
                   workingValues={workingValueMap}
-                  lensDocId={lensDocId}
+                  lensDocId={reference}
                   gutter={false}
                   documents={documents}
                   readingsByItem={readingsByItem}
@@ -585,8 +516,9 @@ export function ReconcileViewer({
                 </span>
                 <span>· {items.length} lines</span>
               </span>
-              <span className="ml-auto shrink-0 text-meta text-muted-foreground">
-                {fadedCount} marks faded — other pages
+              <span className="ml-auto shrink-0 truncate text-meta text-muted-foreground">
+                <span className="font-medium text-foreground">{referenceDoc.label}</span> highlighted
+                · other sources dimmed
               </span>
             </div>
 
@@ -608,7 +540,7 @@ export function ReconcileViewer({
                 issueNumber={issueNumber}
                 dispositions={dispositions}
                 workingValues={workingValueMap}
-                lensDocId={lensDocId}
+                lensDocId={reference}
                 gutter={gutter}
                 documents={documents}
                 readingsByItem={readingsByItem}
