@@ -6,7 +6,8 @@ import { AnimatePresence, motion } from "framer-motion";
 import { ArrowLeft, ArrowRight, Check, Play, Scale, X } from "lucide-react";
 
 import { AgentRun } from "@/components/new/AgentRun";
-import { UploadZone } from "@/components/new/UploadZone";
+import { GitCompareArrows } from "lucide-react";
+import { DropPanel } from "@/components/new/DropPanel";
 import { Logo } from "@/components/app/AppShell";
 import { GlobalActions, Topbar } from "@/components/app/Topbar";
 import {
@@ -79,32 +80,24 @@ export default function NewReconciliationPage() {
             >
               {step === 0 && (
                 <>
-                  <Card className="flex flex-col gap-5 p-5">
-                    <div className="flex flex-col gap-1">
-                      <h2 className="text-h3 font-medium tracking-tight">Upload documents</h2>
-                      <p className="text-body-sm text-muted-foreground">
-                        Two sources: the document you trust, and the one you are checking against it.
-                        PDF + PDF or PDF + Excel.
+                  <div className="flex items-start gap-4">
+                    <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-[rgba(70,100,220,0.10)] text-brand">
+                      <GitCompareArrows className="h-6 w-6" />
+                    </span>
+                    <div className="flex flex-col gap-1 pt-0.5">
+                      <h2 className="text-h1 font-semibold tracking-tight">Reconcile two documents</h2>
+                      <p className="text-body-lg text-muted-foreground">
+                        Upload exactly two files (at least one PDF), then choose the statements to
+                        reconcile.
                       </p>
                     </div>
+                  </div>
 
-                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                      <UploadZone
-                        slot="A"
-                        title="Source document"
-                        description="PDF / Excel"
-                        value={draft.docA}
-                        onChange={(docA) => setDraft({ docA })}
-                      />
-                      <UploadZone
-                        slot="B"
-                        title="Comparison document"
-                        description="PDF / Excel"
-                        value={draft.docB}
-                        onChange={(docB) => setDraft({ docB })}
-                      />
-                    </div>
-                  </Card>
+                  <DropPanel
+                    docA={draft.docA}
+                    docB={draft.docB}
+                    onChange={(patch) => setDraft(patch)}
+                  />
 
                   <Card className="grid grid-cols-1 gap-4 p-5 md:grid-cols-2">
                     <Field label="Project name" hint="Shown on the dashboard and the report.">
@@ -130,7 +123,7 @@ export default function NewReconciliationPage() {
               {step === 2 && (
                 <AgentRun
                   draft={draft}
-                  onDone={() => router.push(`/workspace/${projectId.current ?? "acme-fy2024"}`)}
+                  onDone={() => router.push("/workbook")}
                 />
               )}
             </motion.div>
@@ -143,7 +136,7 @@ export default function NewReconciliationPage() {
                 onClick={() => (step === 0 ? router.push("/") : setStep(step - 1))}
               >
                 <ArrowLeft />
-                {step === 0 ? "Back to dashboard" : "Back"}
+                {step === 0 ? "Back to agent" : "Back"}
               </Button>
 
               {step === 0 ? (
