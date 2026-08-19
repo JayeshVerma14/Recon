@@ -30,7 +30,7 @@ export default function WorkbookPage() {
   const openComments = issues.filter((i) => dispositions[i.id] === undefined);
 
   return (
-    <AppShell>
+    <AppShell fill>
       <AgentHeader
         parent="Document Reconciliation"
         parentHref="/"

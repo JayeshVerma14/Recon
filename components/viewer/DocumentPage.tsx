@@ -124,6 +124,7 @@ export function DocumentPage({
             return (
               <tr
                 key={item.id}
+                data-issue-anchor={issue ? issue.id : undefined}
                 ref={focused ? (el) => { focusRef.current = el; } : undefined}
                 onMouseEnter={() => onHover(item.id)}
                 onMouseLeave={() => onHover(null)}
@@ -223,6 +224,7 @@ export function DocumentPage({
               return (
                 <div
                   key={note.id}
+                  data-issue-anchor={issue ? issue.id : undefined}
                   ref={focused ? (el) => { focusRef.current = el; } : undefined}
                   onClick={() => issue && onIssueClick(issue.id)}
                   className={cn("flex flex-col gap-1", issue && "cursor-pointer")}

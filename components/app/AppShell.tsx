@@ -49,14 +49,21 @@ export function Logo({ className }: { className?: string }) {
   );
 }
 
-export function AppShell({ children }: { children: React.ReactNode }) {
+export function AppShell({
+  children,
+  fill = false,
+}: {
+  children: React.ReactNode;
+  /** Page manages its own scrolling and must not grow past the viewport. */
+  fill?: boolean;
+}) {
   const pathname = usePathname();
   const router = useRouter();
   const [collapsed, setCollapsed] = React.useState(false);
   const [recentOpen, setRecentOpen] = React.useState(true);
 
   return (
-    <div className="flex min-h-screen bg-surface">
+    <div className={cn("flex bg-surface", fill ? "h-screen overflow-hidden" : "min-h-screen")}>
       <aside
         className={cn(
           "hidden shrink-0 flex-col border-r border-border bg-surface transition-[width] duration-standard lg:flex",
@@ -160,7 +167,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </button>
       </aside>
 
-      <div className="flex min-w-0 flex-1 flex-col">{children}</div>
+      <div className={cn("flex min-w-0 flex-1 flex-col", fill && "min-h-0 overflow-hidden")}>
+        {children}
+      </div>
     </div>
   );
 }
