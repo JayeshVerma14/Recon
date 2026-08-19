@@ -51,6 +51,7 @@ export function CommentCard({
   disposition,
   focused,
   hovered,
+  mode = "work",
   onFocus,
   onHover,
   onDispose,
@@ -63,16 +64,37 @@ export function CommentCard({
   disposition?: Disposition;
   focused: boolean;
   hovered: boolean;
+  /**
+   * "read" is the printed-page reading of a comment: the agent's finding as
+   * text, with no way to act on it — the same thing you would see if you had
+   * saved the reconciled PDF and opened it in a reader. "work" adds the
+   * decision controls, and belongs only to the review view.
+   */
+  mode?: "read" | "work";
   onFocus: () => void;
   onHover: (itemId: string | null) => void;
-  onDispose: (disposition: Disposition) => void;
-  onReopen: () => void;
+  onDispose?: (disposition: Disposition) => void;
+  onReopen?: () => void;
 }) {
   const meta = KIND_META[issue.kind];
   const shape = SHAPE_META[issue.shape];
   const ShapeIcon = issue.shape === "single" ? Flag : issue.shape === "consensus" ? Sigma : GitCompareArrows;
   const outlierNames = issue.readings.filter((r) => !r.agrees).map((r) => r.label);
   const closed = disposition !== undefined;
+
+  if (mode === "read") {
+    return (
+      <PrintedComment
+        issue={issue}
+        item={item}
+        project={project}
+        number={number}
+        disposition={disposition}
+        focused={focused}
+        onFocus={onFocus}
+      />
+    );
+  }
 
   return (
     <li
@@ -163,7 +185,7 @@ export function CommentCard({
             type="button"
             onClick={(e) => {
               e.stopPropagation();
-              onReopen();
+              onReopen?.();
             }}
             className="ml-auto inline-flex items-center gap-1 text-helper text-brand transition-colors duration-fast hover:underline"
           >
@@ -180,7 +202,7 @@ export function CommentCard({
                 size="xs"
                 onClick={(e) => {
                   e.stopPropagation();
-                  onDispose("resolved");
+                  onDispose?.("resolved");
                 }}
               >
                 <Check />
@@ -204,7 +226,7 @@ export function CommentCard({
                 size="xs"
                 onClick={(e) => {
                   e.stopPropagation();
-                  onDispose("flagged");
+                  onDispose?.("flagged");
                 }}
               >
                 <Flag />
@@ -220,7 +242,7 @@ export function CommentCard({
                 size="xs"
                 onClick={(e) => {
                   e.stopPropagation();
-                  onDispose("dismissed");
+                  onDispose?.("dismissed");
                 }}
               >
                 Dismiss
@@ -403,6 +425,193 @@ function TextEvidence({ issue, project }: { issue: Issue; project: Project }) {
           ))}
         </p>
       </div>
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/*                              printed annotation                             */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * A comment the way a PDF reader prints one in the margin: a numbered marker
+ * that ties back to the mark on the page, who wrote it, the note itself, and
+ * the passage or figures it refers to. Nothing to press.
+ *
+ * The "slightly better than paper" part is the arithmetic — a reader would
+ * leave you to subtract the sources yourself; this lays them out under one
+ * another with the reconciled figure on top, so the odd one out is visible
+ * without doing the sums.
+ */
+function PrintedComment({
+  issue,
+  item,
+  project,
+  number,
+  disposition,
+  focused,
+  onFocus,
+}: {
+  issue: Issue;
+  item?: LineItem;
+  project: Project;
+  number: number;
+  disposition?: Disposition;
+  focused: boolean;
+  onFocus: () => void;
+}) {
+  const closed = disposition !== undefined;
+  const outliers = issue.readings.filter((r) => !r.agrees);
+  const agreeing = issue.readings.filter((r) => r.agrees);
+  const outlierNames = outliers.map((r) => r.label);
+  const working = issue.workingValue ?? item?.valueB;
+
+  /* the shape of the disagreement, said once, in words */
+  const shape =
+    issue.shape === "single" && outlierNames.length === 1
+      ? `${outlierNames[0]} is out`
+      : SHAPE_META[issue.shape].label;
+
+  return (
+    <li
+      onClick={onFocus}
+      className={cn(
+        "cursor-pointer rounded-md border border-l-2 bg-surface px-3 py-2.5 transition-colors duration-fast",
+        closed ? "border-l-border-strong" : "border-l-critical",
+        focused ? "border-border-strong bg-[rgba(70,100,220,0.03)]" : "border-border-subtle",
+        closed && "opacity-75 hover:opacity-100"
+      )}
+    >
+      <div className="flex items-baseline gap-2">
+        <span
+          className={cn(
+            "flex h-[18px] w-[18px] shrink-0 translate-y-0.5 items-center justify-center rounded-full text-[10px] font-semibold text-white",
+            closed ? DISPOSITION_META[disposition].className : "bg-critical"
+          )}
+        >
+          {number}
+        </span>
+        <span className="min-w-0 flex-1 text-body-sm font-medium leading-5">{issue.title}</span>
+      </div>
+
+      <p className="mt-0.5 pl-[26px] text-meta text-muted-foreground">
+        Reconciliation agent · {shape} · {issue.confidence}% confidence
+      </p>
+
+      <p className="mt-1.5 pl-[26px] text-helper leading-[18px] text-foreground/90">
+        {issue.explanation}
+      </p>
+
+      {issue.kind === "formula" && (
+        <div className="mt-2 pl-[26px]">
+          <p className="text-meta text-muted-foreground">
+            {issue.sheet}!{issue.cell} — {issue.defect?.toLowerCase()}
+          </p>
+          <p className="mt-0.5 font-mono text-helper text-foreground/90">{issue.formula}</p>
+          {issue.expectedFormula && (
+            <p className="font-mono text-helper text-[#0F7048]">
+              expected {issue.expectedFormula}
+            </p>
+          )}
+        </div>
+      )}
+
+      {issue.kind === "text" ? (
+        <PrintedPassage issue={issue} project={project} />
+      ) : (
+        item &&
+        working !== undefined && (
+          <dl className="mt-2 ml-[26px] flex flex-col gap-1 border-t border-border-subtle pt-1.5">
+            <Figure label="Reconciled" value={formatValue(working, item.unit)} strong />
+            {outliers.map((row) => (
+              <Figure
+                key={row.docId}
+                label={row.label}
+                value={formatValue(row.value ?? working, item.unit)}
+                delta={formatDifference(row.delta, item.unit)}
+              />
+            ))}
+            {agreeing.length > 0 && (
+              <dd className="text-meta text-muted-foreground">
+                {agreeing.length} other {agreeing.length === 1 ? "source reads" : "sources read"}{" "}
+                {formatValue(working, item.unit)}
+              </dd>
+            )}
+          </dl>
+        )
+      )}
+
+      <p className="mt-2 pl-[26px] text-meta text-muted-foreground">
+        {closed
+          ? `${DISPOSITION_META[disposition].label} · ${item?.reviewer ?? "you"}`
+          : "Open — no decision recorded"}
+      </p>
+    </li>
+  );
+}
+
+function Figure({
+  label,
+  value,
+  delta,
+  strong,
+}: {
+  label: string;
+  value: string;
+  delta?: string;
+  strong?: boolean;
+}) {
+  return (
+    <div className="flex items-baseline gap-2">
+      <dt
+        className={cn(
+          "min-w-0 flex-1 truncate text-helper",
+          strong ? "text-foreground" : "text-muted-foreground"
+        )}
+      >
+        {label}
+      </dt>
+      {delta && (
+        <dd className="tabular shrink-0 font-mono text-meta text-critical">{delta}</dd>
+      )}
+      <dd
+        className={cn(
+          "tabular shrink-0 font-mono text-body-sm",
+          strong ? "font-medium text-foreground" : "text-critical"
+        )}
+      >
+        {value}
+      </dd>
+    </div>
+  );
+}
+
+/** Wording changes read as a proof mark: struck where it was cut, plain where it stands. */
+function PrintedPassage({ issue, project }: { issue: Issue; project: Project }) {
+  const missing = issue.missingIn === "working";
+  const { left, right } = wordDiff(issue.workingText ?? "", issue.referenceText ?? "");
+
+  return (
+    <div className="mt-2 ml-[26px] flex flex-col gap-1.5 border-l border-border pl-2.5">
+      <p className="text-helper italic leading-[18px] text-foreground/90">
+        {missing ? (
+          <span className="text-critical">Passage not found on this document.</span>
+        ) : (
+          left.map((token, i) => (
+            <span key={i} className={cn(token.changed && "text-[#B91C1C] line-through")}>
+              {token.text}
+            </span>
+          ))
+        )}
+      </p>
+      <p className="text-meta text-muted-foreground">{project.docA.label} reads:</p>
+      <p className="text-helper italic leading-[18px] text-foreground/90">
+        {right.map((token, i) => (
+          <span key={i} className={cn(token.changed && "text-[#0F7048] underline decoration-[#0F7048]/40")}>
+            {token.text}
+          </span>
+        ))}
+      </p>
     </div>
   );
 }

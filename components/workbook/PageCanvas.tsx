@@ -13,7 +13,7 @@ const clamp = (n: number) => Math.max(MIN_SCALE, Math.min(MAX_SCALE, n));
  * than reflowed, the frame scrolls in both directions once the page is bigger
  * than the frame, and the default zoom fits the page to the frame's width.
  */
-export function usePageZoom() {
+export function usePageZoom({ gutter = 0 }: { gutter?: number } = {}) {
   const frameRef = React.useRef<HTMLDivElement | null>(null);
   const pageRef = React.useRef<HTMLDivElement | null>(null);
   const manual = React.useRef(false);
@@ -22,27 +22,39 @@ export function usePageZoom() {
   const [scale, setScaleState] = React.useState(1);
   const [fit, setFit] = React.useState(1);
   const [naturalHeight, setNaturalHeight] = React.useState(0);
+  const [frameWidth, setFrameWidth] = React.useState(0);
 
   const setScale = React.useCallback((next: number) => {
     scaleRef.current = next;
     setScaleState(next);
   }, []);
 
+  /**
+   * Re-measure the frame and re-fit, unless the reader has chosen a zoom.
+   *
+   * Fit means the largest page that still leaves the note margin free — page
+   * size is never given up to centre the page. Centring is taken only from
+   * width nothing else wants: zoom out, or a frame wide enough that the page
+   * has hit maximum zoom, and the page slides to the middle on its own.
+   */
+  const refit = React.useCallback(() => {
+    const frame = frameRef.current;
+    if (!frame) return;
+    setFrameWidth(frame.clientWidth);
+    const next = clamp((frame.clientWidth - 40 - gutter) / PAGE_WIDTH);
+    setFit(next);
+    if (!manual.current) setScale(next);
+  }, [gutter, setScale]);
+
   /* fit-to-width, and keep fitting while the frame is resized */
   React.useEffect(() => {
     const frame = frameRef.current;
     if (!frame) return;
-    const measure = () => {
-      const available = frame.clientWidth - 40;
-      const next = clamp(available / PAGE_WIDTH);
-      setFit(next);
-      if (!manual.current) setScale(next);
-    };
-    measure();
-    const observer = new ResizeObserver(measure);
+    refit();
+    const observer = new ResizeObserver(refit);
     observer.observe(frame);
     return () => observer.disconnect();
-  }, [setScale]);
+  }, [refit]);
 
   /* the page's own height, unscaled — transform does not change offsetHeight.
      Observed once: re-creating the observer on every render starves anything
@@ -159,8 +171,10 @@ export function usePageZoom() {
     scale,
     isFitted: Math.abs(scale - fit) < 0.005,
     naturalHeight,
+    frameWidth,
     zoomBy,
     fitToWidth,
+    refit,
     pageWidth: PAGE_WIDTH,
   };
 }
@@ -171,6 +185,10 @@ export function PageFrame({
   scale,
   naturalHeight,
   pageWidth,
+  frameWidth = 0,
+  gutter,
+  gutterWidth = 0,
+  gutterGap = 20,
   children,
   className,
 }: {
@@ -179,9 +197,21 @@ export function PageFrame({
   scale: number;
   naturalHeight: number;
   pageWidth: number;
+  /** The frame's own width, so the page can be balanced inside it. */
+  frameWidth?: number;
+  /** Margin content — laid out beside the page and scrolled with it. */
+  gutter?: React.ReactNode;
+  gutterWidth?: number;
+  gutterGap?: number;
   children: React.ReactNode;
   className?: string;
 }) {
+  const pageHeight = naturalHeight * scale || undefined;
+  const scaled = pageWidth * scale;
+  const margin = gutter ? gutterWidth + gutterGap : 0;
+  /* blank space to the left of the page, mirroring the notes on the right —
+     given up a pixel at a time as the page is zoomed past the frame */
+  const lead = Math.max(0, Math.min(margin, frameWidth - 40 - scaled - margin));
   return (
     <div
       ref={frameRef}
@@ -192,17 +222,28 @@ export function PageFrame({
         (className ?? "")
       }
     >
-      {/* the spacer carries the scaled size so the scrollbars are honest */}
-      <div
-        className="mx-auto"
-        style={{ width: pageWidth * scale, height: naturalHeight * scale || undefined }}
-      >
-        <div
-          ref={pageRef}
-          style={{ width: pageWidth, transform: `scale(${scale})`, transformOrigin: "top left" }}
-        >
-          {children}
+      <div className="mx-auto flex items-start" style={{ width: lead + scaled + margin }}>
+        {lead > 0 && <div className="shrink-0" style={{ width: lead }} aria-hidden />}
+
+        {/* the spacer carries the scaled size so the scrollbars are honest */}
+        <div className="shrink-0" style={{ width: scaled, height: pageHeight }}>
+          <div
+            ref={pageRef}
+            style={{ width: pageWidth, transform: `scale(${scale})`, transformOrigin: "top left" }}
+          >
+            {children}
+          </div>
         </div>
+
+        {/* notes keep their own size: zoom scales the page, not the handwriting */}
+        {gutter && (
+          <div
+            className="relative shrink-0"
+            style={{ width: gutterWidth, marginLeft: gutterGap, minHeight: pageHeight }}
+          >
+            {gutter}
+          </div>
+        )}
       </div>
     </div>
   );

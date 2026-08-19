@@ -8,16 +8,18 @@ import {
   ChevronRight,
   Download,
   FileText,
+  Lock,
   Maximize2,
+  MessageSquare,
+  Minimize2,
   Minus,
-  PenLine,
   Plus,
   Sparkles,
 } from "lucide-react";
 
-import { CommentCard } from "@/components/viewer/CommentCard";
 import { DocumentPage, type Mark } from "@/components/viewer/DocumentPage";
-import { PageFrame, SplitHandle, usePageZoom } from "@/components/workbook/PageCanvas";
+import { MarginNotes } from "@/components/workbook/MarginNotes";
+import { PageFrame, usePageZoom } from "@/components/workbook/PageCanvas";
 import { Button, Tag, Tooltip, useToast } from "@/components/element";
 import {
   buildIssues,
@@ -34,6 +36,8 @@ import { cn } from "@/lib/utils";
 import type { Project, StatementId } from "@/lib/types";
 
 const PAGE_ORDER: StatementId[] = ["balance", "income", "cashflow"];
+const NOTE_WIDTH = 296;
+const NOTE_GAP = 20;
 
 /** Smooth where the browser will animate, instant where it will not. */
 function scrollTo(el: HTMLElement, top: number) {
@@ -45,9 +49,9 @@ function scrollTo(el: HTMLElement, top: number) {
 }
 
 /**
- * The run's output: the annotated document on the left, and its comments in the
- * margin on the right. Scrolling the document moves the margin with it — the
- * comment for whatever you are looking at is the one that is open.
+ * The run's output as one document: the reconciled page with the agent's
+ * comments written in its margin, beside the lines they belong to. Reading
+ * only — every decision is made in the review.
  */
 export function ReconciliationReport({
   project,
@@ -58,8 +62,6 @@ export function ReconciliationReport({
 }) {
   const toast = useToast();
   const dispositions = useStore((s) => s.commentDisposition);
-  const disposeComment = useStore((s) => s.disposeComment);
-  const reopenComment = useStore((s) => s.reopenComment);
 
   const allIssues = React.useMemo(() => buildIssues(project), [project]);
   const documents = React.useMemo(() => documentsOf(project), [project]);
@@ -79,13 +81,26 @@ export function ReconciliationReport({
 
   const [pageIndex, setPageIndex] = React.useState(0);
   const [activeIssueId, setActiveIssueId] = React.useState<string | null>(null);
-  const [marginWidth, setMarginWidth] = React.useState(400);
   const [focusIssueId, setFocusIssueId] = React.useState<string | null>(null);
-  const zoom = usePageZoom();
+  const [full, setFull] = React.useState(false);
+  const zoom = usePageZoom({ gutter: NOTE_WIDTH + NOTE_GAP });
 
-  const railRef = React.useRef<HTMLDivElement | null>(null);
-  const cardRefs = React.useRef<Record<string, HTMLLIElement | null>>({});
-  const scrollingFromRail = React.useRef(false);
+  /* the frame changes width the moment the overlay opens, so re-fit there and
+     then rather than waiting on a resize notification */
+  React.useLayoutEffect(() => {
+    zoom.refit();
+  }, [full, zoom.refit]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /* full screen is the reading posture: the document, its margin, and nothing
+     else. Escape is the only way out that a reader will guess. */
+  React.useEffect(() => {
+    if (!full) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setFull(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [full]);
 
   const statement = pages[pageIndex] ?? pages[0];
   const items = React.useMemo(
@@ -125,115 +140,112 @@ export function ReconciliationReport({
   const openOnPage = pageIssues.filter((i) => dispositions[i.id] === undefined).length;
   const verified = project.items.length - allIssues.filter((i) => i.itemId).length;
 
-  /* ------------------------- document scroll → margin ------------------------ */
+  /* land on the first comment of whatever page you turn to, the way you would
+     read down a marked-up document */
   React.useEffect(() => {
-    const frame = zoom.frameRef.current;
-    if (!frame) return;
-    let raf = 0;
+    setActiveIssueId(pageIssues[0]?.id ?? null);
+    setFocusIssueId(null);
+  }, [statement]); // eslint-disable-line react-hooks/exhaustive-deps
 
-    const measure = () => {
-      if (scrollingFromRail.current) return;
-      const anchors = Array.from(frame.querySelectorAll<HTMLElement>("[data-issue-anchor]"));
-      if (!anchors.length) return setActiveIssueId(null);
-
-      /* the comment for the line nearest the top third of the frame */
-      const target = frame.getBoundingClientRect().top + frame.clientHeight * 0.3;
-      let best: string | null = null;
-      let bestDistance = Infinity;
-      anchors.forEach((el) => {
-        const distance = Math.abs(el.getBoundingClientRect().top - target);
-        if (distance < bestDistance) {
-          bestDistance = distance;
-          best = el.dataset.issueAnchor ?? null;
-        }
-      });
-      setActiveIssueId(best);
-    };
-
-    /* throttled on a timer rather than a frame: this has to keep working when
-       the tab is not compositing, and the measurement is a handful of rects */
-    let last = 0;
-    const sync = () => {
-      const now = Date.now();
-      window.clearTimeout(raf);
-      if (now - last > 60) {
-        last = now;
-        measure();
-      } else {
-        raf = window.setTimeout(() => {
-          last = Date.now();
-          measure();
-        }, 60);
-      }
-    };
-
-    measure();
-    frame.addEventListener("scroll", sync, { passive: true });
-    return () => {
-      frame.removeEventListener("scroll", sync);
-      window.clearTimeout(raf);
-    };
-  }, [zoom.frameRef, statement, zoom.scale]);
-
-  /* the margin follows */
-  React.useEffect(() => {
-    if (!activeIssueId || scrollingFromRail.current) return;
-    const card = cardRefs.current[activeIssueId];
-    const rail = railRef.current;
-    if (!card || !rail) return;
-    const cardTop = card.offsetTop;
-    const target = cardTop - 12;
-    if (Math.abs(rail.scrollTop - target) > 8) scrollTo(rail, target);
-  }, [activeIssueId]);
-
-  /* margin → document */
+  /** Clicking a mark on the page opens its note and brings the line into view. */
   const goToIssue = (issue: Issue) => {
     const index = pages.indexOf(issue.statement);
     if (index >= 0 && index !== pageIndex) setPageIndex(index);
     setActiveIssueId(issue.id);
     setFocusIssueId(issue.id);
-    scrollingFromRail.current = true;
     window.setTimeout(() => {
       const frame = zoom.frameRef.current;
       const anchor = frame?.querySelector<HTMLElement>(`[data-issue-anchor="${issue.id}"]`);
-      if (frame && anchor) {
-        const offset =
-          anchor.getBoundingClientRect().top -
-          frame.getBoundingClientRect().top +
-          frame.scrollTop -
-          frame.clientHeight * 0.3;
-        scrollTo(frame, Math.max(0, offset));
-      }
-      window.setTimeout(() => {
-        scrollingFromRail.current = false;
-      }, 500);
+      if (!frame || !anchor) return;
+      const offset =
+        anchor.getBoundingClientRect().top -
+        frame.getBoundingClientRect().top +
+        frame.scrollTop -
+        frame.clientHeight * 0.3;
+      scrollTo(frame, Math.max(0, offset));
     }, 60);
   };
 
   const fileName = `${project.docA.fileName.replace(/\.[^.]+$/, "")}_reconciled.pdf`;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto scrollbar-thin p-4 xl:flex-row xl:gap-1 xl:overflow-hidden">
-      {/* ------------------------------ the document ----------------------------- */}
-      <section className="flex min-h-[560px] min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-surface xl:min-h-0">
-        <header className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border-subtle px-3 py-2.5">
-          <FileText className="h-4 w-4 shrink-0 text-brand" />
-          <span className="min-w-0 truncate text-body-sm font-semibold uppercase tracking-wide">
-            {fileName}
-          </span>
-          <div className="ml-auto flex items-center gap-1.5">
-            <Button variant="ghost" size="sm" onClick={() => onOpenReview(null)}>
-              <PenLine />
-              Edit marks
-            </Button>
-            <Button variant="brandSoft" size="sm" onClick={() => toast("Reconciled PDF downloaded")}>
-              <Download />
-              Download PDF
-            </Button>
-          </div>
-        </header>
+    <div
+      className={cn(
+        "flex min-h-0 flex-1 flex-col overflow-hidden border-t border-border",
+        full && "fixed inset-0 z-50 border-t-0 bg-surface"
+      )}
+    >
+      {/* ----------------------------- the one header ---------------------------- */}
+      <header className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-3 px-4 py-3">
+        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-success text-white">
+          <Check className="h-4 w-4" strokeWidth={3} />
+        </span>
 
-        <div className="flex shrink-0 items-center justify-center gap-2 border-b border-border-subtle py-1.5">
+        <div className="flex min-w-[16rem] flex-1 flex-col gap-0.5">
+          <div className="flex items-center gap-2">
+            <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            <span className="min-w-0 truncate text-body font-medium tracking-tight">
+              {fileName}
+            </span>
+            <Tag variant="brand" className="shrink-0">
+              <Sparkles className="h-2.5 w-2.5" />
+              Agent
+            </Tag>
+            <Tag variant="neutral" className="shrink-0">
+              <Lock className="h-2.5 w-2.5" />
+              Read-only
+            </Tag>
+          </div>
+          <span className="text-helper text-muted-foreground">
+            Verification complete · {project.entity} · {project.period} · finished{" "}
+            {relativeTime(project.lastModified, NOW)} in 41s
+          </span>
+        </div>
+
+        <div className="flex shrink-0 divide-x divide-border-subtle rounded-lg border border-border-subtle">
+          <Stat label="Checked" value={project.items.length} />
+          <Stat label="Agree" value={verified} tone="#179864" />
+          <Stat label="Flagged" value={allIssues.length} tone="#DC2626" />
+        </div>
+
+        <div className="flex shrink-0 items-center gap-2">
+          <Button variant="outline" size="sm" onClick={() => toast("Reconciled PDF downloaded")}>
+            <Download />
+            Download PDF
+          </Button>
+          <Button variant="brand" size="sm" onClick={() => onOpenReview(openIssues[0]?.itemId ?? null)}>
+            Review reconciliation
+            <ArrowRight />
+          </Button>
+          {full && (
+            <Tooltip content="Exit full screen · Esc">
+              <span>
+                <Button
+                  variant="ghost"
+                  size="iconSm"
+                  aria-label="Exit full screen"
+                  onClick={() => setFull(false)}
+                >
+                  <Minimize2 />
+                </Button>
+              </span>
+            </Tooltip>
+          )}
+        </div>
+      </header>
+
+      {/* -------------------------------- the pager ------------------------------ */}
+      <div className="flex shrink-0 items-center gap-2 border-y border-border-subtle px-4 py-1.5">
+        <span className="flex items-center gap-1.5 text-body-sm text-muted-foreground">
+          <MessageSquare className="h-3.5 w-3.5" />
+          <span className="tabular font-mono text-foreground">{pageIssues.length}</span>
+          {pageIssues.length === 1 ? "comment" : "comments"} in the margin
+          {openOnPage > 0 && (
+            <span className="tabular font-mono text-critical">· {openOnPage} open</span>
+          )}
+        </span>
+
+        <div className="mx-auto flex items-center gap-2">
           <Button
             variant="ghost"
             size="iconSm"
@@ -259,195 +271,116 @@ export function ReconciliationReport({
           </Button>
         </div>
 
-        <PageFrame
-          frameRef={zoom.frameRef}
-          pageRef={zoom.pageRef}
-          scale={zoom.scale}
-          naturalHeight={zoom.naturalHeight}
-          pageWidth={zoom.pageWidth}
-        >
-          <DocumentPage
-            project={project}
-            statement={statement}
-            items={items}
-            notes={notes}
-            variant="working"
-            periods={[project.period, project.comparisonPeriod ?? "FY2023"]}
-            marks={marks}
-            issueByItem={issueByItem}
-            textIssues={pageIssues.filter((i) => i.kind === "text")}
-            issueNumber={issueNumber}
-            dispositions={dispositions}
-            workingValues={workingValueMap}
-            lensDocId={null}
-            gutter={false}
-            documents={documents}
-            readingsByItem={readingsByItem}
-            focusIssueId={focusIssueId}
-            focusItemId={null}
-            hoveredItemId={null}
-            onHover={() => undefined}
-            onLineClick={() => undefined}
-            onIssueClick={(id) => {
-              const issue = allIssues.find((i) => i.id === id);
-              if (issue) goToIssue(issue);
-            }}
-          />
-        </PageFrame>
+        <span className="hidden text-helper text-muted-foreground lg:block">
+          Comments are the agent&rsquo;s. Decisions are made in the review.
+        </span>
+      </div>
 
-        <footer className="flex shrink-0 items-center gap-2 border-t border-border-subtle px-3 py-2">
-          <Button
-            variant="outline"
-            size="iconSm"
-            aria-label="Download"
-            onClick={() => toast("Reconciled PDF downloaded")}
-          >
-            <Download />
-          </Button>
-
-          <div className="mx-auto flex items-center gap-1 rounded-lg border border-border px-1 py-0.5">
-            <Button variant="ghost" size="iconSm" aria-label="Zoom out" onClick={() => zoom.zoomBy(-0.1)}>
-              <Minus />
-            </Button>
-            <Tooltip content="Fit the page to the frame">
-              <button
-                type="button"
-                onClick={zoom.fitToWidth}
-                className="tabular w-14 rounded px-1 text-center font-mono text-body-sm transition-colors duration-fast hover:bg-surface-secondary"
-              >
-                {Math.round(zoom.scale * 100)}%
-              </button>
-            </Tooltip>
-            <Button variant="ghost" size="iconSm" aria-label="Zoom in" onClick={() => zoom.zoomBy(0.1)}>
-              <Plus />
-            </Button>
-          </div>
-
-          <Tooltip content="Fit to width">
-            <span>
-              <Button
-                variant={zoom.isFitted ? "secondary" : "outline"}
-                size="iconSm"
-                aria-label="Fit to width"
-                onClick={zoom.fitToWidth}
-              >
-                <Maximize2 />
-              </Button>
-            </span>
-          </Tooltip>
-          <span className="tabular rounded-lg border border-border px-2.5 py-1 font-mono text-body-sm">
-            {pageIndex + 1} <span className="text-muted-foreground">/ {pages.length}</span>
-          </span>
-        </footer>
-      </section>
-
-      <SplitHandle
-        className="hidden xl:flex"
-        onResize={(delta) => setMarginWidth((w) => Math.max(320, Math.min(720, w - delta)))}
-      />
-
-      {/* --------------------------------- the margin ---------------------------- */}
-      <aside
-        style={{ width: marginWidth }}
-        className="flex min-h-0 shrink-0 flex-col gap-3 max-xl:!w-full"
-      >
-        <div className="shrink-0 rounded-xl border border-border bg-surface p-4">
-          <div className="flex items-start gap-2.5">
-            <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-success text-white">
-              <Check className="h-3.5 w-3.5" strokeWidth={3} />
-            </span>
-            <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-              <span className="text-body-lg font-medium tracking-tight">Verification complete</span>
-              <span className="text-helper text-muted-foreground">
-                {project.entity} · {project.period} · finished{" "}
-                {relativeTime(project.lastModified, NOW)} in 41s
-              </span>
-            </div>
-            <Tag variant="brand" className="shrink-0">
-              <Sparkles className="h-2.5 w-2.5" />
-              Agent
-            </Tag>
-          </div>
-
-          <div className="mt-3.5 grid grid-cols-3 divide-x divide-border-subtle rounded-lg border border-border-subtle">
-            <Stat label="Checked" value={project.items.length} />
-            <Stat label="Agree" value={verified} tone="#179864" />
-            <Stat label="Flagged" value={allIssues.length} tone="#DC2626" />
-          </div>
-
-        </div>
-
-        <div className="flex shrink-0 items-center gap-2 px-0.5">
-          <span className="text-body font-medium">Comments on this page</span>
-          <Tag variant={openOnPage ? "critical" : "success"} className="ml-auto">
-            {openOnPage} open
-          </Tag>
-        </div>
-
-        <div
-          ref={railRef}
-          className="relative min-h-0 flex-1 overflow-y-auto scrollbar-thin rounded-xl border border-border bg-surface-secondary/30 p-2.5"
-        >
-          {pageIssues.length === 0 ? (
-            <p className="px-4 py-10 text-center text-body-sm text-muted-foreground">
+      {/* ------------------------- the page and its margin ----------------------- */}
+      <PageFrame
+        frameRef={zoom.frameRef}
+        pageRef={zoom.pageRef}
+        scale={zoom.scale}
+        naturalHeight={zoom.naturalHeight}
+        pageWidth={zoom.pageWidth}
+        frameWidth={zoom.frameWidth}
+        gutterWidth={NOTE_WIDTH}
+        gutterGap={NOTE_GAP}
+        gutter={
+          pageIssues.length > 0 ? (
+            <MarginNotes
+              issues={pageIssues}
+              project={project}
+              dispositions={dispositions}
+              issueNumber={issueNumber}
+              pageRef={zoom.pageRef}
+              scale={zoom.scale}
+              statement={statement}
+              activeId={activeIssueId}
+              onSelect={setActiveIssueId}
+            />
+          ) : (
+            <p className="rounded-md border border-dashed border-border px-3 py-4 text-center text-helper text-muted-foreground">
               Nothing flagged on this page — every figure agreed across all sources.
             </p>
-          ) : (
-            <ul className="flex flex-col gap-2">
-              {pageIssues.map((issue) => (
-                <div
-                  key={issue.id}
-                  ref={(el) => {
-                    cardRefs.current[issue.id] = el as unknown as HTMLLIElement | null;
-                  }}
-                  className={cn(
-                    "rounded-lg transition-all duration-standard",
-                    activeIssueId === issue.id && "ring-2 ring-brand/40"
-                  )}
-                >
-                  <CommentCard
-                    issue={issue}
-                    item={project.items.find((i) => i.id === issue.itemId)}
-                    project={project}
-                    number={issueNumber.get(issue.id) ?? 0}
-                    disposition={dispositions[issue.id]}
-                    focused={activeIssueId === issue.id}
-                    hovered={false}
-                    onFocus={() => goToIssue(issue)}
-                    onHover={() => undefined}
-                    onDispose={(disposition) => {
-                      disposeComment(issue.id, issue.itemId ?? null, disposition);
-                      toast(
-                        disposition === "resolved"
-                          ? `Resolved · ${issue.title}`
-                          : disposition === "flagged"
-                            ? `Flagged to the preparer · ${issue.title}`
-                            : `Dismissed · ${issue.title}`,
-                        disposition === "flagged" ? "info" : "success"
-                      );
-                    }}
-                    onReopen={() => reopenComment(issue.id)}
-                  />
-                </div>
-              ))}
-            </ul>
-          )}
+          )
+        }
+      >
+        <DocumentPage
+          project={project}
+          statement={statement}
+          items={items}
+          notes={notes}
+          variant="working"
+          periods={[project.period, project.comparisonPeriod ?? "FY2023"]}
+          marks={marks}
+          issueByItem={issueByItem}
+          textIssues={pageIssues.filter((i) => i.kind === "text")}
+          issueNumber={issueNumber}
+          dispositions={dispositions}
+          workingValues={workingValueMap}
+          lensDocId={null}
+          gutter={false}
+          documents={documents}
+          readingsByItem={readingsByItem}
+          focusIssueId={focusIssueId}
+          focusItemId={null}
+          hoveredItemId={null}
+          onHover={() => undefined}
+          onLineClick={() => undefined}
+          onIssueClick={(id) => {
+            const issue = allIssues.find((i) => i.id === id);
+            if (issue) goToIssue(issue);
+          }}
+        />
+      </PageFrame>
+
+      {/* -------------------------------- the ruler ------------------------------ */}
+      <footer className="flex shrink-0 items-center gap-2 border-t border-border-subtle px-3 py-2">
+        <span className="tabular font-mono text-body-sm text-muted-foreground">
+          {pageIndex + 1} / {pages.length}
+        </span>
+
+        <div className="mx-auto flex items-center gap-1 rounded-lg border border-border px-1 py-0.5">
+          <Button variant="ghost" size="iconSm" aria-label="Zoom out" onClick={() => zoom.zoomBy(-0.1)}>
+            <Minus />
+          </Button>
+          <Tooltip content="Fit the page to the frame">
+            <button
+              type="button"
+              onClick={zoom.fitToWidth}
+              className="tabular w-14 rounded px-1 text-center font-mono text-body-sm transition-colors duration-fast hover:bg-surface-secondary"
+            >
+              {Math.round(zoom.scale * 100)}%
+            </button>
+          </Tooltip>
+          <Button variant="ghost" size="iconSm" aria-label="Zoom in" onClick={() => zoom.zoomBy(0.1)}>
+            <Plus />
+          </Button>
         </div>
 
-        <Button variant="brand" className="shrink-0" onClick={() => onOpenReview(null)}>
-          Review reconciliation
-          <ArrowRight />
-        </Button>
-      </aside>
+        <Tooltip content={full ? "Exit full screen · Esc" : "Full screen — the document and its comments, nothing else"}>
+          <span>
+            <Button
+              variant={full ? "secondary" : "outline"}
+              size="iconSm"
+              aria-label={full ? "Exit full screen" : "Full screen"}
+              onClick={() => setFull((v) => !v)}
+            >
+              {full ? <Minimize2 /> : <Maximize2 />}
+            </Button>
+          </span>
+        </Tooltip>
+      </footer>
     </div>
   );
 }
 
 function Stat({ label, value, tone }: { label: string; value: number; tone?: string }) {
   return (
-    <div className="flex flex-col gap-0.5 px-3 py-2">
+    <div className="flex items-baseline gap-1.5 px-2.5 py-1.5">
       <span className="text-meta uppercase tracking-wider text-muted-foreground">{label}</span>
-      <span className="tabular font-mono text-h3" style={tone ? { color: tone } : undefined}>
+      <span className="tabular font-mono text-body-lg" style={tone ? { color: tone } : undefined}>
         {value}
       </span>
     </div>
