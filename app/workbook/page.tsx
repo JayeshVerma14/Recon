@@ -30,7 +30,7 @@ export default function WorkbookPage() {
   const openComments = issues.filter((i) => dispositions[i.id] === undefined);
 
   return (
-    <AppShell>
+    <AppShell fill>
       <AgentHeader
         parent="Document Reconciliation"
         parentHref="/"
@@ -80,7 +80,7 @@ export default function WorkbookPage() {
               onClick={() => setViewer({ open: true, itemId: openComments[0]?.itemId ?? null })}
             >
               <FileCheck2 />
-              Reconciled PDF
+              Review reconciliation
             </Button>
             <Button
               variant="outline"
