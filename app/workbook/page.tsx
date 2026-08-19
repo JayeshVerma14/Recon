@@ -80,7 +80,7 @@ export default function WorkbookPage() {
               onClick={() => setViewer({ open: true, itemId: openComments[0]?.itemId ?? null })}
             >
               <FileCheck2 />
-              Reconciled PDF
+              Review reconciliation
             </Button>
             <Button
               variant="outline"

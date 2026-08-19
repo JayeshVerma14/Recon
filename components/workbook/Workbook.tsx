@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 
 import { Grid, type Selection } from "@/components/workbook/Grid";
+import { ReconciliationReport } from "@/components/workbook/ReconciliationReport";
 import { ExportMenu } from "@/components/app/ExportMenu";
 import { ReviewStatusTag } from "@/components/app/StatusPills";
 import { Button, Progress, Tag, useToast } from "@/components/element";
@@ -20,6 +21,7 @@ import { buildWorkbook, cellRef, type Cell, type Sheet } from "@/lib/workbook";
 import { countByStatus, projectProgress, relativeTime } from "@/lib/derive";
 import { NOW, statementLabel } from "@/lib/mock";
 import { useStore } from "@/lib/store";
+import { buildIssues } from "@/lib/issues";
 import { cn } from "@/lib/utils";
 import type { Project } from "@/lib/types";
 
@@ -28,10 +30,10 @@ export function Workbook({
   onOpenSource,
 }: {
   project: Project;
-  onOpenSource: (itemId: string) => void;
+  onOpenSource: (itemId: string | null) => void;
 }) {
   const reports = useStore((s) => s.reports);
-  const [tab, setTab] = React.useState<"workbook" | "reports">("workbook");
+  const [tab, setTab] = React.useState<"workbook" | "reports">("reports");
 
   const generated = React.useMemo(() => buildWorkbook(project), [project]);
   const [overrides, setOverrides] = React.useState<Record<string, string>>({});
@@ -49,6 +51,11 @@ export function Workbook({
   const [draft, setDraft] = React.useState("");
 
   const projectReports = reports.filter((r) => r.projectId === project.id);
+  const dispositions = useStore((s) => s.commentDisposition);
+  const openComments = React.useMemo(
+    () => buildIssues(project).filter((i) => dispositions[i.id] === undefined).length,
+    [project, dispositions]
+  );
 
   const cellValue = (sel: Selection | null): string => {
     if (!sel || !active) return "";
@@ -89,16 +96,16 @@ export function Workbook({
       {/* ------------------------------- card head ------------------------------- */}
       <div className="flex shrink-0 flex-wrap items-center gap-3 px-4 py-3">
         <div className="flex items-center gap-1">
-          <TabButton active={tab === "workbook"} onClick={() => setTab("workbook")} icon={<Table2 />}>
-            Workbook
-          </TabButton>
           <TabButton
             active={tab === "reports"}
             onClick={() => setTab("reports")}
             icon={<FileText />}
-            badge={projectReports.length}
+            badge={openComments}
           >
-            Reports
+            Report
+          </TabButton>
+          <TabButton active={tab === "workbook"} onClick={() => setTab("workbook")} icon={<Table2 />}>
+            Workbook
           </TabButton>
         </div>
 
@@ -210,7 +217,7 @@ export function Workbook({
           </div>
         </>
       ) : (
-        <ReportsTab project={project} />
+        <ReconciliationReport project={project} onOpenReview={onOpenSource} />
       )}
     </div>
   );
