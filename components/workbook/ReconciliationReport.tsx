@@ -7,7 +7,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Download,
-  FileSpreadsheet,
   FileText,
   Maximize2,
   Minus,
@@ -19,11 +18,10 @@ import {
 import { CommentCard } from "@/components/viewer/CommentCard";
 import { DocumentPage, type Mark } from "@/components/viewer/DocumentPage";
 import { PageFrame, usePageZoom } from "@/components/workbook/PageCanvas";
-import { Button, Progress, Tag, Tooltip, useToast } from "@/components/element";
+import { Button, Tag, Tooltip, useToast } from "@/components/element";
 import {
   buildIssues,
   documentsOf,
-  implicates,
   notesForStatement,
   workingValues as buildWorkingValues,
   type Issue,
@@ -124,9 +122,7 @@ export function ReconciliationReport({
 
   const openIssues = allIssues.filter((i) => dispositions[i.id] === undefined);
   const openOnPage = pageIssues.filter((i) => dispositions[i.id] === undefined).length;
-  const closed = allIssues.length - openIssues.length;
   const verified = project.items.length - allIssues.filter((i) => i.itemId).length;
-  const reconciliationDoc = documents[0];
 
   /* ------------------------- document scroll → margin ------------------------ */
   React.useEffect(() => {
@@ -370,49 +366,6 @@ export function ReconciliationReport({
             <Stat label="Flagged" value={allIssues.length} tone="#DC2626" />
           </div>
 
-          <p className="mt-3 text-body-sm text-muted-foreground">
-            Every figure in{" "}
-            <span className="font-medium text-foreground">{reconciliationDoc.label}</span> was checked
-            against {documents.length - 1} supporting files.
-          </p>
-
-          <div className="mt-2.5 flex flex-wrap gap-1.5">
-            {documents.slice(1).map((doc) => {
-              const differs = allIssues.filter((issue) => implicates(issue, doc.id)).length;
-              return (
-                <span
-                  key={doc.id}
-                  title={doc.fileName}
-                  className={cn(
-                    "inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-meta",
-                    differs > 0
-                      ? "border-[#F59E0B]/40 bg-[rgba(245,158,11,0.10)] text-[#B45309]"
-                      : "border-border-subtle bg-surface-secondary text-muted-foreground"
-                  )}
-                >
-                  {doc.kind === "pdf" ? (
-                    <FileText className="h-2.5 w-2.5" />
-                  ) : (
-                    <FileSpreadsheet className="h-2.5 w-2.5" />
-                  )}
-                  {doc.label}
-                  {differs > 0 && <span className="tabular font-mono">{differs}</span>}
-                </span>
-              );
-            })}
-          </div>
-
-          <div className="mt-3 flex items-center gap-2">
-            <Progress
-              className="flex-1"
-              size="sm"
-              value={allIssues.length ? (closed / allIssues.length) * 100 : 100}
-              tone={closed === allIssues.length ? "success" : "warning"}
-            />
-            <span className="tabular shrink-0 font-mono text-meta text-muted-foreground">
-              {closed}/{allIssues.length} closed
-            </span>
-          </div>
         </div>
 
         <div className="flex shrink-0 items-center gap-2 px-0.5">
