@@ -17,7 +17,7 @@ import {
 
 import { CommentCard } from "@/components/viewer/CommentCard";
 import { DocumentPage, type Mark } from "@/components/viewer/DocumentPage";
-import { PageFrame, usePageZoom } from "@/components/workbook/PageCanvas";
+import { PageFrame, SplitHandle, usePageZoom } from "@/components/workbook/PageCanvas";
 import { Button, Tag, Tooltip, useToast } from "@/components/element";
 import {
   buildIssues,
@@ -79,6 +79,7 @@ export function ReconciliationReport({
 
   const [pageIndex, setPageIndex] = React.useState(0);
   const [activeIssueId, setActiveIssueId] = React.useState<string | null>(null);
+  const [marginWidth, setMarginWidth] = React.useState(400);
   const [focusIssueId, setFocusIssueId] = React.useState<string | null>(null);
   const zoom = usePageZoom();
 
@@ -212,7 +213,7 @@ export function ReconciliationReport({
   const fileName = `${project.docA.fileName.replace(/\.[^.]+$/, "")}_reconciled.pdf`;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto scrollbar-thin p-4 xl:flex-row xl:overflow-hidden">
+    <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto scrollbar-thin p-4 xl:flex-row xl:gap-1 xl:overflow-hidden">
       {/* ------------------------------ the document ----------------------------- */}
       <section className="flex min-h-[560px] min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-surface xl:min-h-0">
         <header className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border-subtle px-3 py-2.5">
@@ -340,8 +341,16 @@ export function ReconciliationReport({
         </footer>
       </section>
 
+      <SplitHandle
+        className="hidden xl:flex"
+        onResize={(delta) => setMarginWidth((w) => Math.max(320, Math.min(720, w - delta)))}
+      />
+
       {/* --------------------------------- the margin ---------------------------- */}
-      <aside className="flex min-h-0 shrink-0 flex-col gap-3 xl:w-[400px]">
+      <aside
+        style={{ width: marginWidth }}
+        className="flex min-h-0 shrink-0 flex-col gap-3 max-xl:!w-full"
+      >
         <div className="shrink-0 rounded-xl border border-border bg-surface p-4">
           <div className="flex items-start gap-2.5">
             <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-success text-white">
