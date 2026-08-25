@@ -4,10 +4,6 @@ import * as React from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   Check,
-  ChevronLeft,
-  ChevronRight,
-  ChevronsLeft,
-  ChevronsRight,
   Columns3,
   Download,
   FileSpreadsheet,
@@ -25,6 +21,13 @@ import {
 import { CommentCard } from "@/components/viewer/CommentCard";
 import { DocumentPage, type Mark } from "@/components/viewer/DocumentPage";
 import { ExcelPane } from "@/components/viewer/ExcelPane";
+import {
+  PAGE_WIDTH,
+  PdfBarButton,
+  PdfFloatingControls,
+  PdfToolbar,
+  usePdfView,
+} from "@/components/viewer/PdfView";
 import { Button, Progress, Tooltip, useToast } from "@/components/element";
 import { isReviewed } from "@/lib/derive";
 import {
@@ -83,7 +86,14 @@ export function ReconcileViewer({
   );
   const allIssues = React.useMemo(() => buildIssues(project), [project]);
 
-  const [pageIndex, setPageIndex] = React.useState(0);
+  const view = usePdfView({ pageCount: pages.length });
+  const pageIndex = view.page - 1;
+  const setPageIndex = React.useCallback(
+    (next: number | ((current: number) => number)) => {
+      view.goToPage((typeof next === "function" ? next(view.page - 1) : next) + 1);
+    },
+    [view]
+  );
   const [tool, setTool] = React.useState<Mark>("tick");
   const [reference, setReference] = React.useState<string>("A");
   const [gutter, setGutter] = React.useState(false);
@@ -306,113 +316,73 @@ export function ReconcileViewer({
         </div>
       </div>
 
-      {/* --------------------------------- pager --------------------------------- */}
-      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border-subtle px-5 py-2">
-        <div className="flex items-center gap-1">
-          <PagerButton onClick={() => setPageIndex(0)} label="First page" disabled={pageIndex === 0}>
-            <ChevronsLeft />
-          </PagerButton>
-          <PagerButton
-            onClick={() => setPageIndex((p) => Math.max(0, p - 1))}
-            label="Previous page"
-            disabled={pageIndex === 0}
-          >
-            <ChevronLeft />
-          </PagerButton>
-          <span className="px-1.5 text-body-sm">
-            Page <span className="tabular font-mono">{pageIndex + 1}</span> /{" "}
-            <span className="tabular font-mono">{pages.length}</span>
-            <span className="text-muted-foreground">
-              {" "}
-              · reconciled {reconciledPages}/{pages.length}
+      {/* ------------------------------ reader chrome ---------------------------- */}
+      <PdfToolbar
+        view={view}
+        showName={false}
+        can={[]}
+        fileName={`${project.docB.fileName.replace(/\.[^.]+$/, "")}_reconciled.pdf`}
+        leading={
+          <div className="flex items-center gap-0.5">
+            {pages.map((page, i) => {
+              const openOnPage = allIssues.filter((x) => x.statement === page && isOpen(x)).length;
+              return (
+                <button
+                  key={page}
+                  type="button"
+                  onClick={() => setPageIndex(i)}
+                  className={cn(
+                    "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-body-sm transition-colors duration-fast",
+                    i === pageIndex
+                      ? "bg-[rgba(70,100,220,0.10)] font-medium text-[#2F45A8]"
+                      : "text-muted-foreground hover:bg-surface-secondary hover:text-foreground"
+                  )}
+                >
+                  {statementLabel(page).replace(" Statement", "")}
+                  {openOnPage > 0 && (
+                    <span className="tabular flex h-4 min-w-4 items-center justify-center rounded-full bg-critical px-1 font-mono text-[10px] text-white">
+                      {openOnPage}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+            <span className="mx-1.5 h-5 w-px bg-border" />
+            <span className="tabular hidden font-mono text-helper text-muted-foreground xl:inline">
+              reconciled {reconciledPages}/{pages.length}
             </span>
-          </span>
-          <PagerButton
-            onClick={() => setPageIndex((p) => Math.min(pages.length - 1, p + 1))}
-            label="Next page"
-            disabled={pageIndex === pages.length - 1}
-          >
-            <ChevronRight />
-          </PagerButton>
-          <PagerButton
-            onClick={() => setPageIndex(pages.length - 1)}
-            label="Last page"
-            disabled={pageIndex === pages.length - 1}
-          >
-            <ChevronsRight />
-          </PagerButton>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-1.5">
-          {pages.map((page, i) => {
-            const openOnPage = allIssues.filter((x) => x.statement === page && isOpen(x)).length;
-            return (
-              <button
-                key={page}
-                type="button"
-                onClick={() => setPageIndex(i)}
-                className={cn(
-                  "inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-helper transition-colors duration-fast",
-                  i === pageIndex
-                    ? "bg-[rgba(70,100,220,0.10)] font-medium text-[#2F45A8]"
-                    : "text-muted-foreground hover:bg-surface-secondary"
-                )}
-              >
-                {statementLabel(page).replace(" Statement", "")}
-                {openOnPage > 0 && (
-                  <span className="tabular flex h-4 min-w-4 items-center justify-center rounded-full bg-critical px-1 font-mono text-[10px] text-white">
-                    {openOnPage}
-                  </span>
-                )}
-              </button>
-            );
-          })}
-        </div>
-
-        <div className="ml-auto flex items-center gap-1.5">
-          <Tooltip content={sync ? "Panes scroll together" : "Panes scroll independently"}>
-            <button
-              type="button"
-              onClick={() => setSync((v) => !v)}
-              className={cn(
-                "inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-helper transition-colors duration-fast",
-                sync
-                  ? "border-brand/40 bg-[rgba(70,100,220,0.08)] text-[#2F45A8]"
-                  : "border-border text-muted-foreground hover:bg-surface-secondary"
-              )}
-            >
-              {sync ? <Link2 className="h-3.5 w-3.5" /> : <Link2Off className="h-3.5 w-3.5" />}
-              Sync scroll
-            </button>
-          </Tooltip>
-          <Tooltip content="Show a per-source agreement strip beside every line">
-            <button
-              type="button"
-              onClick={() => setGutter((v) => !v)}
-              className={cn(
-                "inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-helper transition-colors duration-fast",
-                gutter
-                  ? "border-brand/40 bg-[rgba(70,100,220,0.08)] text-[#2F45A8]"
-                  : "border-border text-muted-foreground hover:bg-surface-secondary"
-              )}
-            >
-              <Columns3 className="h-3.5 w-3.5" />
-              Agreement grid
-            </button>
-          </Tooltip>
-          <Button
-            variant="ghost"
-            size="iconSm"
-            aria-label={railOpen ? "Hide comments" : "Show comments"}
-            onClick={() => setRailOpen((v) => !v)}
-          >
-            {railOpen ? <PanelRightClose /> : <PanelRightOpen />}
-          </Button>
-        </div>
-      </div>
+          </div>
+        }
+      >
+        <PdfBarButton
+          label={sync ? "Panes scroll together" : "Panes scroll independently"}
+          active={sync}
+          onClick={() => setSync((v) => !v)}
+        >
+          {sync ? <Link2 /> : <Link2Off />}
+        </PdfBarButton>
+        <PdfBarButton
+          label="Agreement grid"
+          active={gutter}
+          onClick={() => setGutter((v) => !v)}
+        >
+          <Columns3 />
+        </PdfBarButton>
+        <PdfBarButton
+          label={railOpen ? "Hide comments" : "Show comments"}
+          active={railOpen}
+          onClick={() => setRailOpen((v) => !v)}
+        >
+          {railOpen ? <PanelRightClose /> : <PanelRightOpen />}
+        </PdfBarButton>
+      </PdfToolbar>
 
       {/* --------------------------------- panes --------------------------------- */}
-      <div className="flex min-h-0 flex-1 gap-3 p-3">
+      <div className="relative flex min-h-0 flex-1 gap-3 p-3">
+        <PdfFloatingControls
+          view={view}
+          className={cn(railOpen ? "right-[22.75rem]" : "right-5")}
+        />
         <div className="grid min-h-0 min-w-0 flex-1 grid-cols-1 gap-3 lg:grid-cols-2">
           {/* reference — PDF filing or the supporting workbook */}
           <div className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-lg border border-border">
@@ -473,6 +443,7 @@ export function ReconcileViewer({
                 onScroll={onScroll("left")}
                 className="min-h-0 flex-1 overflow-auto scrollbar-thin bg-[#EDF1F6] p-4"
               >
+                <ScaledSheet scale={view.scale}>
                 <DocumentPage
                   project={project}
                   statement={statement}
@@ -497,6 +468,7 @@ export function ReconcileViewer({
                   onLineClick={setFocusLineId}
                   onIssueClick={setFocusIssueId}
                 />
+                </ScaledSheet>
               </div>
             )}
           </div>
@@ -523,10 +495,14 @@ export function ReconcileViewer({
             </div>
 
             <div
-              ref={rightScroll}
+              ref={(el) => {
+                rightScroll.current = el;
+                view.attachFrame(el);
+              }}
               onScroll={onScroll("right")}
               className="min-h-0 flex-1 overflow-auto scrollbar-thin bg-[#EDF1F6] p-4"
             >
+              <ScaledSheet scale={view.scale}>
               <DocumentPage
                 project={project}
                 statement={statement}
@@ -551,6 +527,7 @@ export function ReconcileViewer({
                 onLineClick={toggleMark}
                 onIssueClick={setFocusIssueId}
               />
+              </ScaledSheet>
             </div>
           </div>
         </div>
@@ -717,6 +694,33 @@ export function ReconcileViewer({
   );
 }
 
+/** A pane's sheet at the viewer's zoom — scaled, not reflowed. */
+function ScaledSheet({ scale, children }: { scale: number; children: React.ReactNode }) {
+  const sheetRef = React.useRef<HTMLDivElement | null>(null);
+  const [height, setHeight] = React.useState(0);
+
+  React.useLayoutEffect(() => {
+    const sheet = sheetRef.current;
+    if (!sheet) return;
+    const measure = () => setHeight(sheet.offsetHeight);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(sheet);
+    return () => observer.disconnect();
+  }, []);
+
+  return (
+    <div className="mx-auto" style={{ width: PAGE_WIDTH * scale, height: height * scale || undefined }}>
+      <div
+        ref={sheetRef}
+        style={{ width: PAGE_WIDTH, transform: `scale(${scale})`, transformOrigin: "top left" }}
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
+
 function Kbd({ children }: { children: React.ReactNode }) {
   return (
     <kbd className="rounded border border-border bg-surface-secondary px-1 font-mono">{children}</kbd>
@@ -758,30 +762,6 @@ function ToolButton({
       >
         {hint}
       </kbd>
-    </button>
-  );
-}
-
-function PagerButton({
-  onClick,
-  label,
-  disabled,
-  children,
-}: {
-  onClick: () => void;
-  label: string;
-  disabled?: boolean;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-label={label}
-      disabled={disabled}
-      className="rounded-md p-1.5 text-muted-foreground transition-colors duration-fast hover:bg-surface-secondary hover:text-foreground disabled:pointer-events-none disabled:opacity-40 [&_svg]:size-4"
-    >
-      {children}
     </button>
   );
 }

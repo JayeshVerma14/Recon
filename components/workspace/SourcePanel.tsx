@@ -4,17 +4,14 @@ import * as React from "react";
 import {
   ArrowRight,
   Check,
-  ChevronLeft,
-  ChevronRight,
   FileSpreadsheet,
   FileText,
   MessageSquarePlus,
   MousePointerClick,
-  Minus,
-  Plus,
   X,
 } from "lucide-react";
 
+import { PdfFloatingControls, PdfToolbar, usePdfView } from "@/components/viewer/PdfView";
 import { PdfPage, SheetView } from "@/components/workspace/DocumentViewer";
 import { ReviewStatusTag } from "@/components/app/StatusPills";
 import {
@@ -49,16 +46,17 @@ export function SourcePanel() {
   const setStatus = useStore((s) => s.setStatus);
   const addNote = useStore((s) => s.addNote);
 
-  const [page, setPage] = React.useState(item?.sourceA.page ?? 42);
-  const [zoom, setZoom] = React.useState(1);
   const [noteDraft, setNoteDraft] = React.useState("");
   const [noteOpen, setNoteOpen] = React.useState(false);
 
+  const view = usePdfView({ pageCount: project.docA.pages ?? 1 });
+  const { goToPage } = view;
+
   React.useEffect(() => {
-    if (item?.sourceA.page) setPage(item.sourceA.page);
+    if (item?.sourceA.page) goToPage(item.sourceA.page);
     setNoteOpen(false);
     setNoteDraft(item?.note ?? "");
-  }, [item?.id, item?.sourceA.page, item?.note]);
+  }, [item?.id, item?.sourceA.page, item?.note, goToPage]);
 
   const activeSource = item ? (sourceDoc === "A" ? item.sourceA : item.sourceB) : null;
   const doc = sourceDoc === "A" ? project.docA : project.docB;
@@ -103,67 +101,41 @@ export function SourcePanel() {
       </div>
 
       {/* -------------------------------- viewer --------------------------------- */}
-      <div className="flex shrink-0 items-center gap-1 border-b border-border-subtle px-2 py-1.5">
-        {doc.kind === "pdf" ? (
-          <>
-            <Button
-              variant="ghost"
-              size="iconXs"
-              aria-label="Previous page"
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-            >
-              <ChevronLeft />
-            </Button>
+      {doc.kind === "pdf" ? (
+        <PdfToolbar
+          view={view}
+          showName={false}
+          can={[]}
+          fileName={doc.fileName}
+          className="h-10"
+          leading={
             <span className="tabular font-mono text-helper text-muted-foreground">
-              Page {page} of {doc.pages}
+              {doc.fileName}
             </span>
-            <Button
-              variant="ghost"
-              size="iconXs"
-              aria-label="Next page"
-              onClick={() => setPage((p) => Math.min(doc.pages ?? 999, p + 1))}
-            >
-              <ChevronRight />
-            </Button>
-          </>
-        ) : (
-          <span className="px-1 font-mono text-helper text-muted-foreground">
+          }
+        />
+      ) : (
+        <div className="flex h-10 shrink-0 items-center gap-1 border-b border-border-subtle px-3">
+          <span className="font-mono text-helper text-muted-foreground">
             {item?.sourceB.sheet ?? "IS_Model"} · {item?.sourceB.cell ?? "—"}
           </span>
-        )}
-
-        <div className="ml-auto flex items-center gap-0.5">
-          <Button
-            variant="ghost"
-            size="iconXs"
-            aria-label="Zoom out"
-            onClick={() => setZoom((z) => Math.max(0.7, Number((z - 0.1).toFixed(2))))}
-          >
-            <Minus />
-          </Button>
-          <span className="tabular w-9 text-center font-mono text-meta text-muted-foreground">
-            {Math.round(zoom * 100)}%
-          </span>
-          <Button
-            variant="ghost"
-            size="iconXs"
-            aria-label="Zoom in"
-            onClick={() => setZoom((z) => Math.min(1.4, Number((z + 0.1).toFixed(2))))}
-          >
-            <Plus />
-          </Button>
         </div>
-      </div>
+      )}
 
-      <div className="min-h-0 flex-1 overflow-auto scrollbar-thin">
+      <div className="relative flex min-h-0 flex-1">
+      {doc.kind === "pdf" && <PdfFloatingControls view={view} className="right-3" />}
+      <div
+        ref={doc.kind === "pdf" ? view.attachFrame : undefined}
+        className="min-h-0 flex-1 overflow-auto scrollbar-thin"
+      >
         {doc.kind === "pdf" ? (
           <PdfPage
             project={project}
-            page={page}
+            page={view.page}
             items={project.items}
             activeItemId={item?.id ?? null}
             onPickItem={(id) => setActiveItem(id, "A")}
-            zoom={zoom}
+            zoom={view.scale}
           />
         ) : (
           <SheetView
@@ -175,6 +147,7 @@ export function SourcePanel() {
           />
         )}
 
+      </div>
       </div>
 
       {/* ------------------------------- item detail ------------------------------ */}
