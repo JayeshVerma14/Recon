@@ -21,13 +21,7 @@ import {
 import { CommentCard } from "@/components/viewer/CommentCard";
 import { DocumentPage, type Mark } from "@/components/viewer/DocumentPage";
 import { ExcelPane } from "@/components/viewer/ExcelPane";
-import {
-  PAGE_WIDTH,
-  PdfBarButton,
-  PdfFloatingControls,
-  PdfToolbar,
-  usePdfView,
-} from "@/components/viewer/PdfView";
+import { PAGE_WIDTH, PdfBarButton, PdfToolbar, usePdfView } from "@/components/viewer/PdfView";
 import { Button, Progress, Tooltip, useToast } from "@/components/element";
 import { isReviewed } from "@/lib/derive";
 import {
@@ -332,10 +326,10 @@ export function ReconcileViewer({
                   type="button"
                   onClick={() => setPageIndex(i)}
                   className={cn(
-                    "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-body-sm transition-colors duration-fast",
+                    "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md px-2.5 text-body-sm transition-colors duration-fast",
                     i === pageIndex
-                      ? "bg-[rgba(70,100,220,0.10)] font-medium text-[#2F45A8]"
-                      : "text-muted-foreground hover:bg-surface-secondary hover:text-foreground"
+                      ? "bg-[rgba(70,100,220,0.32)] font-medium text-white"
+                      : "text-white/70 hover:bg-white/10 hover:text-white"
                   )}
                 >
                   {statementLabel(page).replace(" Statement", "")}
@@ -347,8 +341,8 @@ export function ReconcileViewer({
                 </button>
               );
             })}
-            <span className="mx-1.5 h-5 w-px bg-border" />
-            <span className="tabular hidden font-mono text-helper text-muted-foreground xl:inline">
+            <span className="mx-1.5 h-5 w-px bg-white/15" />
+            <span className="tabular hidden font-mono text-helper text-white/55 xl:inline">
               reconciled {reconciledPages}/{pages.length}
             </span>
           </div>
@@ -378,11 +372,7 @@ export function ReconcileViewer({
       </PdfToolbar>
 
       {/* --------------------------------- panes --------------------------------- */}
-      <div className="relative flex min-h-0 flex-1 gap-3 p-3">
-        <PdfFloatingControls
-          view={view}
-          className={cn(railOpen ? "right-[22.75rem]" : "right-5")}
-        />
+      <div className="flex min-h-0 flex-1 gap-3 p-3">
         <div className="grid min-h-0 min-w-0 flex-1 grid-cols-1 gap-3 lg:grid-cols-2">
           {/* reference — PDF filing or the supporting workbook */}
           <div className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-lg border border-border">

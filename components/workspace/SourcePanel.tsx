@@ -11,7 +11,7 @@ import {
   X,
 } from "lucide-react";
 
-import { PdfFloatingControls, PdfToolbar, usePdfView } from "@/components/viewer/PdfView";
+import { PdfToolbar, usePdfView } from "@/components/viewer/PdfView";
 import { PdfPage, SheetView } from "@/components/workspace/DocumentViewer";
 import { ReviewStatusTag } from "@/components/app/StatusPills";
 import {
@@ -108,22 +108,15 @@ export function SourcePanel() {
           can={[]}
           fileName={doc.fileName}
           className="h-10"
-          leading={
-            <span className="tabular font-mono text-helper text-muted-foreground">
-              {doc.fileName}
-            </span>
-          }
         />
       ) : (
-        <div className="flex h-10 shrink-0 items-center gap-1 border-b border-border-subtle px-3">
-          <span className="font-mono text-helper text-muted-foreground">
+        <div className="flex h-10 shrink-0 items-center gap-1 bg-[#16273F] px-3">
+          <span className="font-mono text-helper text-white/70">
             {item?.sourceB.sheet ?? "IS_Model"} · {item?.sourceB.cell ?? "—"}
           </span>
         </div>
       )}
 
-      <div className="relative flex min-h-0 flex-1">
-      {doc.kind === "pdf" && <PdfFloatingControls view={view} className="right-3" />}
       <div
         ref={doc.kind === "pdf" ? view.attachFrame : undefined}
         className="min-h-0 flex-1 overflow-auto scrollbar-thin"
@@ -147,7 +140,6 @@ export function SourcePanel() {
           />
         )}
 
-      </div>
       </div>
 
       {/* ------------------------------- item detail ------------------------------ */}

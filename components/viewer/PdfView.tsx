@@ -399,29 +399,54 @@ export function usePdfView({
 export type PdfCapability = "thumbnails" | "spread" | "rotate" | "full";
 
 /**
- * The document's actions, as a row of icons. Page and zoom are deliberately
- * absent — those ride with the page, in the floating rail.
+ * The control set a reader expects above a document, in the order a viewer puts
+ * them: what you are looking at on the left, where you are and how big in the
+ * middle, what you can do with it on the right.
+ *
+ * The bar is the application's ink navy rather than a browser's neutral grey —
+ * a document surface should still read as part of this product.
  */
-export function PdfActions({
+export function PdfToolbar({
   view,
+  fileName,
+  showName = true,
   onDownload,
   onPrint,
   can = ["thumbnails", "spread", "rotate", "full"],
+  className,
+  leading,
   children,
 }: {
   view: PdfView;
+  fileName: string;
+  /** Off where the surface already names the document above the bar. */
+  showName?: boolean;
   onDownload?: () => void;
   onPrint?: () => void;
   /** Omit what this surface does not implement — a dead toggle is worse than none. */
   can?: PdfCapability[];
+  className?: string;
+  /** Controls belonging to this view, placed after the name. */
+  leading?: React.ReactNode;
   children?: React.ReactNode;
 }) {
   const allows = (c: PdfCapability) => can.includes(c);
+  const [draft, setDraft] = React.useState(String(view.page));
+  React.useEffect(() => setDraft(String(view.page)), [view.page]);
+
+  const commit = () => {
+    const next = Number(draft);
+    if (Number.isFinite(next) && next >= 1) view.goToPage(Math.round(next));
+    else setDraft(String(view.page));
+  };
 
   return (
-    <div className="flex shrink-0 items-center gap-0.5">
-      {children}
-
+    <div
+      className={cn(
+        "flex h-11 shrink-0 items-center gap-1 bg-[#16273F] px-2 text-white",
+        className
+      )}
+    >
       {allows("thumbnails") && (
         <PdfBarButton
           label="Thumbnails"
@@ -431,6 +456,59 @@ export function PdfActions({
           <PanelLeft />
         </PdfBarButton>
       )}
+
+      {showName && (
+        <span className="ml-1 hidden min-w-0 max-w-[18rem] items-center gap-1.5 truncate text-body-sm text-white/90 lg:flex">
+          <FileText className="h-3.5 w-3.5 shrink-0 text-white/50" />
+          <span className="truncate">{fileName}</span>
+        </span>
+      )}
+
+      {leading}
+
+      {/* -------------------------- where you are, how big ------------------------ */}
+      <div className="mx-auto flex items-center gap-0.5">
+        <PdfBarButton
+          label="Previous page"
+          onClick={() => view.stepPage(-1)}
+          disabled={view.page <= 1}
+        >
+          <ChevronUp />
+        </PdfBarButton>
+        <input
+          value={draft}
+          onChange={(e) => setDraft(e.target.value.replace(/[^0-9]/g, ""))}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") e.currentTarget.blur();
+            if (e.key === "Escape") setDraft(String(view.page));
+          }}
+          aria-label="Page number"
+          className="tabular h-7 w-9 rounded-md border border-white/15 bg-white/10 text-center font-mono text-body-sm text-white outline-none focus:border-brand/70"
+        />
+        <span className="tabular px-1 font-mono text-body-sm text-white/55">
+          / {view.pageCount}
+        </span>
+        <PdfBarButton
+          label="Next page"
+          onClick={() => view.stepPage(1)}
+          disabled={view.page >= view.pageCount}
+        >
+          <ChevronDown />
+        </PdfBarButton>
+
+        <span className="mx-1.5 h-5 w-px bg-white/15" />
+
+        <PdfBarButton label="Zoom out" onClick={() => view.zoomBy(-1)}>
+          <ZoomOut />
+        </PdfBarButton>
+        <ZoomMenu view={view} />
+        <PdfBarButton label="Zoom in" onClick={() => view.zoomBy(1)}>
+          <ZoomIn />
+        </PdfBarButton>
+      </div>
+
+      {/* ------------------------- what you can do with it ----------------------- */}
       {allows("spread") && (
         <PdfBarButton
           label={view.spread === 2 ? "Single page view" : "Two page view"}
@@ -440,9 +518,19 @@ export function PdfActions({
           <Columns2 />
         </PdfBarButton>
       )}
+      {allows("rotate") && (
+        <PdfBarButton label="Rotate clockwise" onClick={() => view.rotate(1)}>
+          <RotateCw />
+        </PdfBarButton>
+      )}
       {onDownload && (
         <PdfBarButton label="Download" onClick={onDownload}>
           <Download />
+        </PdfBarButton>
+      )}
+      {onPrint && (
+        <PdfBarButton label="Print" onClick={onPrint}>
+          <Printer />
         </PdfBarButton>
       )}
       {allows("full") && (
@@ -455,12 +543,14 @@ export function PdfActions({
         </PdfBarButton>
       )}
 
+      {children}
+
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <button
             type="button"
             aria-label="More actions"
-            className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors duration-fast hover:bg-surface-secondary hover:text-foreground [&_svg]:size-4"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-white/80 transition-colors duration-fast hover:bg-white/10 hover:text-white [&_svg]:size-4"
           >
             <MoreVertical />
           </button>
@@ -475,12 +565,7 @@ export function PdfActions({
             Fit page
             {view.zoomMode === "fit-page" && <Mark />}
           </DropdownMenuItem>
-          {[0.5, 1, 1.5, 2].map((step) => (
-            <DropdownMenuItem key={step} onSelect={() => view.setZoom(step)}>
-              <span className="tabular font-mono">{Math.round(step * 100)}%</span>
-              {view.zoomMode === "custom" && Math.abs(view.scale - step) < 0.005 && <Mark />}
-            </DropdownMenuItem>
-          ))}
+
           {(allows("spread") || allows("rotate")) && (
             <>
               <DropdownMenuSeparator />
@@ -513,14 +598,26 @@ export function PdfActions({
               </DropdownMenuItem>
             </>
           )}
-          {onPrint && (
+          {allows("thumbnails") && (
             <>
               <DropdownMenuSeparator />
-              <DropdownMenuItem onSelect={onPrint}>
-                <Printer />
-                Print
+              <DropdownMenuItem onSelect={() => view.setThumbnails(!view.thumbnails)}>
+                <PanelLeft />
+                {view.thumbnails ? "Hide thumbnails" : "Show thumbnails"}
               </DropdownMenuItem>
             </>
+          )}
+          {onPrint && (
+            <DropdownMenuItem onSelect={onPrint}>
+              <Printer />
+              Print
+            </DropdownMenuItem>
+          )}
+          {onDownload && (
+            <DropdownMenuItem onSelect={onDownload}>
+              <Download />
+              Download
+            </DropdownMenuItem>
           )}
         </DropdownMenuContent>
       </DropdownMenu>
@@ -528,65 +625,48 @@ export function PdfActions({
   );
 }
 
-/** A light bar: what you are looking at on the left, what you can do on the right. */
-export function PdfToolbar({
-  view,
-  fileName,
-  subtitle,
-  showName = true,
-  onDownload,
-  onPrint,
-  can,
-  className,
-  leading,
-  children,
-}: {
-  view: PdfView;
-  fileName: string;
-  subtitle?: string;
-  /** Off where the surface already names the document above the bar. */
-  showName?: boolean;
-  onDownload?: () => void;
-  onPrint?: () => void;
-  can?: PdfCapability[];
-  className?: string;
-  /** Controls belonging to this view, placed after the name. */
-  leading?: React.ReactNode;
-  children?: React.ReactNode;
-}) {
-  return (
-    <div
-      className={cn(
-        "flex h-12 shrink-0 items-center gap-2 border-b border-border-subtle bg-surface px-3",
-        className
-      )}
-    >
-      {showName && (
-        <span className="flex min-w-0 items-center gap-2">
-          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[rgba(70,100,220,0.10)] text-brand">
-            <FileText className="h-3.5 w-3.5" />
-          </span>
-          <span className="flex min-w-0 flex-col">
-            <span className="min-w-0 truncate text-body-sm font-medium">{fileName}</span>
-            {subtitle && (
-              <span className="truncate text-meta text-muted-foreground">{subtitle}</span>
-            )}
-          </span>
-        </span>
-      )}
-
-      {leading}
-
-      <div className="ml-auto flex items-center gap-0.5">
-        {children}
-        <PdfActions view={view} onDownload={onDownload} onPrint={onPrint} can={can} />
-      </div>
-    </div>
-  );
-}
-
 function Mark() {
   return <span className="ml-auto text-meta text-brand">●</span>;
+}
+
+function ZoomMenu({ view }: { view: PdfView }) {
+  const label =
+    view.zoomMode === "fit-width"
+      ? "Fit width"
+      : view.zoomMode === "fit-page"
+        ? "Fit page"
+        : `${Math.round(view.scale * 100)}%`;
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          className="tabular inline-flex h-7 min-w-[5.25rem] items-center justify-center gap-1 rounded-md border border-white/15 bg-white/10 px-2 font-mono text-body-sm text-white transition-colors duration-fast hover:bg-white/20"
+        >
+          {label}
+          <ChevronDown className="h-3 w-3 text-white/60" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="center">
+        <DropdownMenuItem onSelect={view.fitWidth}>
+          Fit width
+          {view.zoomMode === "fit-width" && <Mark />}
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={view.fitPage}>
+          Fit page
+          {view.zoomMode === "fit-page" && <Mark />}
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        {[0.5, 0.75, 1, 1.25, 1.5, 2, 3].map((step) => (
+          <DropdownMenuItem key={step} onSelect={() => view.setZoom(step)}>
+            <span className="tabular font-mono">{Math.round(step * 100)}%</span>
+            {view.zoomMode === "custom" && Math.abs(view.scale - step) < 0.005 && <Mark />}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
 }
 
 export function PdfBarButton({
@@ -611,146 +691,11 @@ export function PdfBarButton({
         disabled={disabled}
         onClick={onClick}
         className={cn(
-          "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors duration-fast [&_svg]:size-4",
+          "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md transition-colors duration-fast [&_svg]:size-4",
           active
-            ? "bg-[rgba(70,100,220,0.10)] text-[#2F45A8]"
-            : "text-muted-foreground hover:bg-surface-secondary hover:text-foreground",
-          disabled && "pointer-events-none opacity-40"
-        )}
-      >
-        {children}
-      </button>
-    </Tooltip>
-  );
-}
-
-/* -------------------------------------------------------------------------- */
-/*                              floating controls                             */
-/* -------------------------------------------------------------------------- */
-
-/** Beyond this, a column of every page number stops being a shortcut. */
-const PAGE_LIST_LIMIT = 6;
-
-/**
- * Page and zoom, floating over the document at the right edge — the two things
- * a reader reaches for constantly, kept beside the page rather than parked in a
- * bar at the top of the window.
- */
-export function PdfFloatingControls({
-  view,
-  className,
-}: {
-  view: PdfView;
-  className?: string;
-}) {
-  const listed = view.pageCount > 1 && view.pageCount <= PAGE_LIST_LIMIT;
-
-  return (
-    <div
-      className={cn(
-        "pointer-events-none absolute right-4 top-1/2 z-20 -translate-y-1/2",
-        className
-      )}
-    >
-      <div className="pointer-events-auto flex w-11 flex-col items-center rounded-2xl border border-border bg-surface/95 py-1.5 shadow-[0_2px_10px_rgba(10,37,64,0.10)] backdrop-blur-sm">
-        {listed ? (
-          <div className="flex flex-col items-center gap-0.5 px-1">
-            {Array.from({ length: view.pageCount }, (_, i) => i + 1).map((n) => (
-              <button
-                key={n}
-                type="button"
-                onClick={() => view.goToPage(n)}
-                aria-label={`Page ${n}`}
-                aria-current={view.page === n}
-                className={cn(
-                  "tabular flex h-7 w-8 items-center justify-center rounded-lg font-mono text-body-sm transition-colors duration-fast",
-                  view.page === n
-                    ? "border border-border bg-surface-secondary font-medium text-foreground"
-                    : "text-muted-foreground hover:bg-surface-secondary hover:text-foreground"
-                )}
-              >
-                {n}
-              </button>
-            ))}
-          </div>
-        ) : (
-          <div className="flex flex-col items-center px-1 py-0.5">
-            <span className="tabular font-mono text-body-sm font-medium">{view.page}</span>
-            <span className="my-0.5 h-px w-4 bg-border" />
-            <span className="tabular font-mono text-meta text-muted-foreground">
-              {view.pageCount}
-            </span>
-          </div>
-        )}
-
-        <Rule />
-
-        <FloatButton
-          label="Previous page"
-          onClick={() => view.stepPage(-1)}
-          disabled={view.page <= 1}
-        >
-          <ChevronUp />
-        </FloatButton>
-        <FloatButton
-          label="Next page"
-          onClick={() => view.stepPage(1)}
-          disabled={view.page >= view.pageCount}
-        >
-          <ChevronDown />
-        </FloatButton>
-
-        <Rule />
-
-        <FloatButton label="Zoom in" onClick={() => view.zoomBy(1)}>
-          <ZoomIn />
-        </FloatButton>
-        <FloatButton label="Zoom out" onClick={() => view.zoomBy(-1)}>
-          <ZoomOut />
-        </FloatButton>
-        <Tooltip
-          content={
-            view.zoomMode === "custom" ? "Fit the page to the frame" : "Zoom to actual size"
-          }
-        >
-          <button
-            type="button"
-            onClick={() => (view.zoomMode === "custom" ? view.fitWidth() : view.setZoom(1))}
-            className="tabular mt-0.5 rounded-lg px-1 py-0.5 font-mono text-[10px] text-muted-foreground transition-colors duration-fast hover:bg-surface-secondary hover:text-foreground"
-          >
-            {Math.round(view.scale * 100)}%
-          </button>
-        </Tooltip>
-      </div>
-    </div>
-  );
-}
-
-function Rule() {
-  return <span className="my-1 h-px w-5 bg-border-subtle" />;
-}
-
-function FloatButton({
-  label,
-  disabled,
-  onClick,
-  children,
-}: {
-  label: string;
-  disabled?: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <Tooltip content={label}>
-      <button
-        type="button"
-        aria-label={label}
-        disabled={disabled}
-        onClick={onClick}
-        className={cn(
-          "inline-flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors duration-fast hover:bg-surface-secondary hover:text-foreground [&_svg]:size-4",
-          disabled && "pointer-events-none opacity-30"
+            ? "bg-[rgba(70,100,220,0.32)] text-white"
+            : "text-white/80 hover:bg-white/10 hover:text-white",
+          disabled && "pointer-events-none opacity-35"
         )}
       >
         {children}
@@ -774,7 +719,6 @@ export function PdfCanvas({
   margin,
   marginWidth = 0,
   marginGap = 20,
-  floating = true,
   className,
 }: {
   view: PdfView;
@@ -783,8 +727,6 @@ export function PdfCanvas({
   margin?: React.ReactNode;
   marginWidth?: number;
   marginGap?: number;
-  /** The page and zoom rail, floating over the document. */
-  floating?: boolean;
   className?: string;
 }) {
   const rows: number[][] = [];
@@ -807,17 +749,12 @@ export function PdfCanvas({
   );
 
   return (
-    <div className="relative flex min-h-0 flex-1">
-      {floating && <PdfFloatingControls view={view} />}
-      <div
-        ref={view.attachFrame}
-        onScroll={view.onScroll}
-        style={{ touchAction: "pan-x pan-y", padding: FRAME_PAD }}
-        className={cn(
-          "min-h-0 flex-1 overflow-auto scrollbar-thin bg-[#F7F9FC] bg-[radial-gradient(#DDE4EE_1px,transparent_1px)] [background-size:16px_16px]",
-          className
-        )}
-      >
+    <div
+      ref={view.attachFrame}
+      onScroll={view.onScroll}
+      style={{ touchAction: "pan-x pan-y", padding: FRAME_PAD }}
+      className={cn("min-h-0 flex-1 overflow-auto scrollbar-thin bg-[#48566E]", className)}
+    >
       <div className="mx-auto flex items-start" style={{ width: lead + widest + reserved }}>
         {lead > 0 && <div className="shrink-0" style={{ width: lead }} aria-hidden />}
 
@@ -833,15 +770,14 @@ export function PdfCanvas({
           ))}
         </div>
 
-          {showMargin && (
-            <div
-              className="relative shrink-0"
-              style={{ width: marginWidth, marginLeft: marginGap }}
-            >
-              {margin}
-            </div>
-          )}
-        </div>
+        {showMargin && (
+          <div
+            className="relative shrink-0"
+            style={{ width: marginWidth, marginLeft: marginGap }}
+          >
+            {margin}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -920,7 +856,7 @@ export function PdfThumbnails({
   labels?: string[];
 }) {
   return (
-    <div className="flex w-[164px] shrink-0 flex-col overflow-y-auto scrollbar-thin bg-[#3C4046] p-3">
+    <div className="flex w-[164px] shrink-0 flex-col overflow-y-auto scrollbar-thin bg-[#1E3050] p-3">
       <ul className="flex flex-col gap-3">
         {pages.map((node, index) => {
           const size = view.pageSizes[index];
@@ -936,7 +872,7 @@ export function PdfThumbnails({
                 className={cn(
                   "relative overflow-hidden rounded-sm bg-white transition-shadow duration-fast",
                   current
-                    ? "ring-2 ring-brand ring-offset-2 ring-offset-[#3C4046]"
+                    ? "ring-2 ring-brand ring-offset-2 ring-offset-[#1E3050]"
                     : "opacity-80 hover:opacity-100"
                 )}
                 style={{
