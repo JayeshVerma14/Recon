@@ -753,7 +753,7 @@ export function PdfCanvas({
       ref={view.attachFrame}
       onScroll={view.onScroll}
       style={{ touchAction: "pan-x pan-y", padding: FRAME_PAD }}
-      className={cn("min-h-0 flex-1 overflow-auto scrollbar-thin bg-[#4A4E54]", className)}
+      className={cn("min-h-0 flex-1 overflow-auto scrollbar-thin bg-[#EDF1F6]", className)}
     >
       <div className="mx-auto flex items-start" style={{ width: lead + widest + reserved }}>
         {lead > 0 && <div className="shrink-0" style={{ width: lead }} aria-hidden />}
