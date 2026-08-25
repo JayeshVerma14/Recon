@@ -28,7 +28,7 @@ export function MarginNotes({
   issueNumber,
   pageRef,
   scale,
-  statement,
+  revision,
   activeId,
   onSelect,
 }: {
@@ -38,7 +38,8 @@ export function MarginNotes({
   issueNumber: Map<string, number>;
   pageRef: React.MutableRefObject<HTMLDivElement | null>;
   scale: number;
-  statement: string;
+  /** Anything that moves the pages without resizing them — spread, rotation. */
+  revision: string;
   activeId: string | null;
   onSelect: (id: string) => void;
 }) {
@@ -69,7 +70,7 @@ export function MarginNotes({
     const observer = new ResizeObserver(measure);
     observer.observe(page);
     return () => observer.disconnect();
-  }, [pageRef, scale, statement, issues]);
+  }, [pageRef, scale, revision, issues]);
 
   /* card heights, so the stack knows what it is stacking */
   React.useLayoutEffect(() => {

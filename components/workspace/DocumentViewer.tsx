@@ -3,6 +3,7 @@
 import * as React from "react";
 import { motion } from "framer-motion";
 
+import { PAGE_WIDTH } from "@/components/viewer/PdfView";
 import { PDF_PAGE_INDEX } from "@/lib/mock";
 import { effectiveValue, formatValue } from "@/lib/derive";
 import { cn } from "@/lib/utils";
@@ -36,8 +37,8 @@ export function PdfPage({
   return (
     <div className="flex justify-center bg-[#EDF1F6] p-4">
       <div
-        className="w-full origin-top rounded-sm bg-white shadow-[0_1px_3px_rgba(10,37,64,0.16)]"
-        style={{ transform: `scale(${zoom})`, transformOrigin: "top center" }}
+        className="origin-top rounded-sm bg-white shadow-[0_1px_3px_rgba(10,37,64,0.16)]"
+        style={{ width: PAGE_WIDTH, transform: `scale(${zoom})`, transformOrigin: "top center" }}
       >
         <div className="flex flex-col gap-4 px-6 py-6">
           <div className="flex items-baseline justify-between border-b border-[#D9E0E8] pb-2">
