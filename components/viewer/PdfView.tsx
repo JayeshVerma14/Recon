@@ -443,7 +443,7 @@ export function PdfToolbar({
   return (
     <div
       className={cn(
-        "flex h-11 shrink-0 items-center gap-1 bg-[#16273F] px-2 text-white",
+        "flex h-11 shrink-0 items-center gap-1 bg-[#33373B] px-2 text-white",
         className
       )}
     >
@@ -753,7 +753,7 @@ export function PdfCanvas({
       ref={view.attachFrame}
       onScroll={view.onScroll}
       style={{ touchAction: "pan-x pan-y", padding: FRAME_PAD }}
-      className={cn("min-h-0 flex-1 overflow-auto scrollbar-thin bg-[#48566E]", className)}
+      className={cn("min-h-0 flex-1 overflow-auto scrollbar-thin bg-[#EDF1F6]", className)}
     >
       <div className="mx-auto flex items-start" style={{ width: lead + widest + reserved }}>
         {lead > 0 && <div className="shrink-0" style={{ width: lead }} aria-hidden />}
@@ -856,7 +856,7 @@ export function PdfThumbnails({
   labels?: string[];
 }) {
   return (
-    <div className="flex w-[164px] shrink-0 flex-col overflow-y-auto scrollbar-thin bg-[#1E3050] p-3">
+    <div className="flex w-[164px] shrink-0 flex-col overflow-y-auto scrollbar-thin bg-[#3C4046] p-3">
       <ul className="flex flex-col gap-3">
         {pages.map((node, index) => {
           const size = view.pageSizes[index];
@@ -872,7 +872,7 @@ export function PdfThumbnails({
                 className={cn(
                   "relative overflow-hidden rounded-sm bg-white transition-shadow duration-fast",
                   current
-                    ? "ring-2 ring-brand ring-offset-2 ring-offset-[#1E3050]"
+                    ? "ring-2 ring-brand ring-offset-2 ring-offset-[#3C4046]"
                     : "opacity-80 hover:opacity-100"
                 )}
                 style={{
