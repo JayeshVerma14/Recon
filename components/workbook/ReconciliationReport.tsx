@@ -4,7 +4,7 @@ import * as React from "react";
 import { ArrowRight, Check, FileText, Lock, MessageSquare, Sparkles } from "lucide-react";
 
 import { DocumentPage, type Mark } from "@/components/viewer/DocumentPage";
-import { PdfActions, PdfCanvas, PdfThumbnails, usePdfView } from "@/components/viewer/PdfView";
+import { PdfCanvas, PdfThumbnails, PdfToolbar, usePdfView } from "@/components/viewer/PdfView";
 import { MarginNotes } from "@/components/workbook/MarginNotes";
 import { Button, Tag, useToast } from "@/components/element";
 import {
@@ -198,11 +198,6 @@ export function ReconciliationReport({
               <span className="tabular font-mono text-critical">· {openIssues.length} open</span>
             )}
           </span>
-          <PdfActions
-            view={view}
-            onDownload={() => toast("Reconciled PDF downloaded")}
-            onPrint={() => toast("Sent to the print dialog", "info")}
-          />
           <Button
             variant="brand"
             size="sm"
@@ -215,7 +210,14 @@ export function ReconciliationReport({
       </header>
 
       {/* -------------------------------- the viewer ----------------------------- */}
-      <div className="flex min-h-0 flex-1 border-t border-border-subtle">
+      <PdfToolbar
+        view={view}
+        fileName={fileName}
+        onDownload={() => toast("Reconciled PDF downloaded")}
+        onPrint={() => toast("Sent to the print dialog", "info")}
+      />
+
+      <div className="flex min-h-0 flex-1">
         {view.thumbnails && (
           <PdfThumbnails
             view={view}
