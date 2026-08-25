@@ -110,7 +110,7 @@ export function SourcePanel() {
           className="h-10"
         />
       ) : (
-        <div className="flex h-10 shrink-0 items-center gap-1 bg-[#16273F] px-3">
+        <div className="flex h-10 shrink-0 items-center gap-1 bg-[#33373B] px-3">
           <span className="font-mono text-helper text-white/70">
             {item?.sourceB.sheet ?? "IS_Model"} · {item?.sourceB.cell ?? "—"}
           </span>
