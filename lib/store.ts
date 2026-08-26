@@ -20,8 +20,13 @@ export type ConfidenceFilter = "all" | "high" | "medium" | "low";
  * What a reviewer did with a comment. The reconciled document is read-only, so
  * a comment is never "applied" — it is closed, or sent back to whoever owns the
  * source document.
+ *
+ * "accepted" only ever lands on a line that could not be verified: it signs the
+ * line off while recording that nothing supported it. Dismissing says the
+ * difference did not matter; accepting says there was no evidence and the
+ * reviewer took it anyway — which the report has to carry, not swallow.
  */
-export type Disposition = "resolved" | "flagged" | "dismissed";
+export type Disposition = "resolved" | "flagged" | "dismissed" | "accepted";
 export type StatusFilter = "all" | ReviewStatus;
 
 export interface Filters {
@@ -88,8 +93,18 @@ interface State {
 
   /* comments */
   commentDisposition: Record<string, Disposition>;
-  /** issueId identifies the comment; itemId is the reconciled line it annotates, when there is one. */
-  disposeComment: (issueId: string, itemId: string | null, disposition: Disposition) => void;
+  /**
+   * issueId identifies the comment; itemId is the reconciled line it annotates,
+   * when there is one. `basis` is the reviewer's own evidence — required when
+   * closing a line the agent could not verify, because a gap closed without a
+   * stated basis is the hole an auditor gets pulled up on.
+   */
+  disposeComment: (
+    issueId: string,
+    itemId: string | null,
+    disposition: Disposition,
+    basis?: string
+  ) => void;
   reopenComment: (issueId: string) => void;
 
   /* wizard */
@@ -214,7 +229,7 @@ export const useStore = create<State>((set, get) => ({
 
   commentDisposition: {},
 
-  disposeComment: (issueId, itemId, disposition) => {
+  disposeComment: (issueId, itemId, disposition, basis) => {
     const { projects, activeProjectId } = get();
     const project = projects.find((p) => p.id === activeProjectId);
     const item = itemId ? project?.items.find((i) => i.id === itemId) : undefined;
@@ -222,12 +237,27 @@ export const useStore = create<State>((set, get) => ({
     /* nothing here writes to the reconciled document — only to the audit trail */
     if (item) {
       if (disposition === "resolved") {
-        get().setStatus([item.id], "approved", "Agreed on review — the reconciled figure stands.");
+        get().setStatus(
+          [item.id],
+          "approved",
+          basis
+            ? `Verified by the reviewer — ${basis}`
+            : "Agreed on review — the reconciled figure stands."
+        );
       } else if (disposition === "flagged") {
         get().setStatus(
           [item.id],
           "needs_review",
-          "Raised with the preparer — the source document needs correcting."
+          basis ?? "Raised with the preparer — the source document needs correcting."
+        );
+      } else if (disposition === "accepted") {
+        /* signed off with the gap on the record, not closed as if it were checked */
+        get().setStatus(
+          [item.id],
+          "needs_review",
+          basis
+            ? `Accepted unverified — ${basis}`
+            : "Accepted unverified — no source supports this line."
         );
       } else {
         get().addNote(item.id, "Dismissed as immaterial — no correction required.");

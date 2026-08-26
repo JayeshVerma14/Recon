@@ -4,20 +4,24 @@ import * as React from "react";
 import {
   Check,
   ChevronDown,
+  CircleDashed,
   CornerUpLeft,
+  FileQuestion,
   FileSpreadsheet,
   FileText,
   Flag,
   GitCompareArrows,
   Hash,
   Sigma,
+  UserCheck,
   X,
 } from "lucide-react";
 
+import { QueryMark } from "@/components/viewer/DocumentPage";
 import { Button, Tooltip } from "@/components/element";
 import { formatDifference, formatValue } from "@/lib/derive";
 import { statementLabel } from "@/lib/mock";
-import { SHAPE_META, SIDE_META, wordDiff, type Issue } from "@/lib/issues";
+import { GAP_INK, GAP_META, SHAPE_META, SIDE_META, wordDiff, type Issue } from "@/lib/issues";
 import type { Disposition } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import type { LineItem, Project } from "@/lib/types";
@@ -26,7 +30,20 @@ const KIND_META = {
   value: { label: "Value", icon: Sigma, className: "text-[#B91C1C]" },
   formula: { label: "Formula", icon: Hash, className: "text-[#B45309]" },
   text: { label: "Text", icon: FileText, className: "text-[#6D28D9]" },
+  gap: { label: "Unverified", icon: CircleDashed, className: "text-[#0E7490]" },
 } as const;
+
+/**
+ * The bases a reviewer actually closes an unverified line on. Offered as chips
+ * because the four of them cover almost every real case, and a chip is one
+ * click where a sentence is a paragraph nobody writes.
+ */
+const BASIS_CHIPS = [
+  "Tied to a source outside the set",
+  "Recalculated from other lines",
+  "Confirmed with the preparer",
+  "Prior-period evidence",
+];
 
 const SIDE_ICON = {
   pdf: FileText,
@@ -41,6 +58,8 @@ const DISPOSITION_META: Record<
   resolved: { label: "Resolved", className: "bg-success", icon: Check },
   flagged: { label: "Flagged for the preparer", className: "bg-warning", icon: Flag },
   dismissed: { label: "Dismissed", className: "bg-[#94A3B8]", icon: X },
+  /* signed off with the gap on the record — never shown as a tick */
+  accepted: { label: "Accepted unverified", className: "bg-[#0B5A70]", icon: CircleDashed },
 };
 
 export function CommentCard({
@@ -73,13 +92,22 @@ export function CommentCard({
   mode?: "read" | "work";
   onFocus: () => void;
   onHover: (itemId: string | null) => void;
-  onDispose?: (disposition: Disposition) => void;
+  onDispose?: (disposition: Disposition, basis?: string) => void;
   onReopen?: () => void;
 }) {
   const meta = KIND_META[issue.kind];
+  const gap = issue.kind === "gap";
+  const reason = issue.gapReason ? GAP_META[issue.gapReason] : undefined;
   const shape = SHAPE_META[issue.shape];
-  const ShapeIcon = issue.shape === "single" ? Flag : issue.shape === "consensus" ? Sigma : GitCompareArrows;
-  const outlierNames = issue.readings.filter((r) => !r.agrees).map((r) => r.label);
+  const ShapeIcon = gap
+    ? CircleDashed
+    : issue.shape === "single"
+      ? Flag
+      : issue.shape === "consensus"
+        ? Sigma
+        : GitCompareArrows;
+  /* on a gap no source is an outlier — none of them had a figure to be out by */
+  const outlierNames = gap ? [] : issue.readings.filter((r) => !r.agrees).map((r) => r.label);
   const closed = disposition !== undefined;
 
   if (mode === "read") {
@@ -112,7 +140,7 @@ export function CommentCard({
         <span
           className={cn(
             "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold text-white",
-            closed ? DISPOSITION_META[disposition].className : "bg-critical"
+            closed ? DISPOSITION_META[disposition].className : gap ? "bg-[#0E7490]" : "bg-critical"
           )}
         >
           {closed ? React.createElement(DISPOSITION_META[disposition].icon, { className: "h-3 w-3", strokeWidth: 3 }) : number}
@@ -124,12 +152,14 @@ export function CommentCard({
             <span
               className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-meta font-semibold uppercase tracking-wider"
               style={{ background: shape.tint, color: shape.fg }}
-              title={shape.hint}
+              title={gap ? reason?.hint : shape.hint}
             >
               <ShapeIcon className="h-2.5 w-2.5" />
-              {issue.shape === "single" && outlierNames.length === 1
-                ? `${outlierNames[0]} is out`
-                : shape.label}
+              {gap
+                ? (reason?.label ?? shape.label)
+                : issue.shape === "single" && outlierNames.length === 1
+                  ? `${outlierNames[0]} is out`
+                  : shape.label}
             </span>
             <span className="inline-flex items-center gap-1 text-meta uppercase tracking-wider text-muted-foreground">
               <meta.icon className={cn("h-3 w-3", meta.className)} />
@@ -145,13 +175,29 @@ export function CommentCard({
           </div>
         </div>
 
-        <span className="tabular shrink-0 rounded bg-surface-secondary px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
-          {issue.confidence}%
-        </span>
+        {/* a reading that was never taken has no confidence to report, so the
+            slot carries coverage instead: how many sources yielded a figure */}
+        {gap ? (
+          <span
+            title={`No figure obtained from any of the ${issue.readings.length} sources`}
+            className="tabular shrink-0 rounded px-1.5 py-0.5 font-mono text-[11px]"
+            style={{ background: GAP_INK.tint, color: GAP_INK.strong }}
+          >
+            0/{issue.readings.length}
+          </span>
+        ) : (
+          <span className="tabular shrink-0 rounded bg-surface-secondary px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
+            {issue.confidence}%
+          </span>
+        )}
       </div>
 
       {/* ------------------------------- evidence ------------------------------- */}
-      {issue.kind === "text" ? (
+      {gap ? (
+        <div className="mx-2.5 mt-2.5">
+          <GapLedger issue={issue} item={item} />
+        </div>
+      ) : issue.kind === "text" ? (
         <TextEvidence issue={issue} project={project} />
       ) : (
         <div className="mx-2.5 mt-2.5 flex flex-col gap-2">
@@ -178,8 +224,14 @@ export function CommentCard({
       {/* ------------------------------ disposition ----------------------------- */}
       {closed ? (
         <div className="flex items-center gap-2 border-t border-border-subtle px-2.5 py-2">
-          <span className="truncate text-meta text-muted-foreground">
+          <span className="min-w-0 flex-1 text-meta text-muted-foreground">
             {DISPOSITION_META[disposition].label} · {item?.reviewer ?? "you"}
+            {/* on a gap the basis is the whole point of the record */}
+            {gap && item?.note && (
+              <span className="block truncate" style={{ color: GAP_INK.strong }}>
+                {item.note}
+              </span>
+            )}
           </span>
           <button
             type="button"
@@ -193,6 +245,8 @@ export function CommentCard({
             Reopen
           </button>
         </div>
+      ) : gap ? (
+        <GapActions issue={issue} onDispose={onDispose} />
       ) : (
         <div className="flex flex-wrap items-center gap-1.5 border-t border-border-subtle px-2.5 py-2">
           <Tooltip content="Checked and agreed — the reconciled figure stands">
@@ -252,6 +306,213 @@ export function CommentCard({
         </div>
       )}
     </li>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/*                                evidence gap                                */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * What the search actually turned up. The first question anyone asks about an
+ * unverified line is "did you even look", so the card answers it before it is
+ * asked: the figure the reconciled document reports, then every source that was
+ * opened and what stopped it counting. Drawn in dashes throughout — there is no
+ * solid rule anywhere on this block, because nothing here is settled.
+ */
+function GapLedger({ issue, item }: { issue: Issue; item?: LineItem }) {
+  const working = issue.workingValue ?? item?.valueB;
+
+  return (
+    <div
+      className="overflow-hidden rounded-md border border-dashed"
+      style={{ borderColor: GAP_INK.edge }}
+    >
+      <div
+        className="flex items-center gap-2 px-2.5 py-1.5"
+        style={{ background: GAP_INK.tint }}
+      >
+        <span className="truncate text-meta font-semibold uppercase tracking-wider text-foreground">
+          Reconciled
+        </span>
+        <span className="tabular ml-auto font-mono text-body-sm font-medium">
+          {working !== undefined && item ? formatValue(working, item.unit) : "—"}
+        </span>
+      </div>
+
+      <div
+        className="flex items-center gap-1.5 border-t border-dashed px-2.5 py-1"
+        style={{ borderColor: DASH, color: GAP_INK.strong }}
+      >
+        <QueryMark title="No figure to compare against" />
+        <span className="text-meta uppercase tracking-wider">
+          Nothing to compare · {issue.readings.length} sources searched
+        </span>
+      </div>
+
+      {issue.readings.map((row) => (
+        <div
+          key={row.docId}
+          className="flex items-start gap-1.5 border-t border-dashed px-2.5 py-1"
+          style={{ borderColor: DASH }}
+        >
+          {row.kind === "pdf" ? (
+            <FileText className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground" />
+          ) : (
+            <FileSpreadsheet className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground" />
+          )}
+          <span className="min-w-0 flex-1 text-helper leading-[16px]">
+            <span className="font-medium text-foreground">{row.label}</span>
+            <span className="text-muted-foreground"> — {row.note ?? "not found"}</span>
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** The dashed rules inside the gap block, one shade lighter than its border. */
+const DASH = "rgba(14,116,144,0.28)";
+
+/**
+ * The three things a reviewer can honestly do with a line nobody could check.
+ *
+ * "Resolve" is not one of them: agreeing with a figure means agreeing with the
+ * evidence behind it, and there is none. What replaces it is an attestation —
+ * the reviewer found what the agent could not, and says where. It is the one
+ * control here that refuses to fire without an answer, because a gap closed
+ * with a bare click is indistinguishable afterwards from a gap nobody noticed,
+ * and that is the hole an auditor gets pulled up on.
+ */
+function GapActions({
+  issue,
+  onDispose,
+}: {
+  issue: Issue;
+  onDispose?: (disposition: Disposition, basis?: string) => void;
+}) {
+  const [attesting, setAttesting] = React.useState(false);
+  const [basis, setBasis] = React.useState("");
+  const reason = issue.gapReason ? GAP_META[issue.gapReason] : undefined;
+  const ready = basis.trim().length > 0;
+
+  const record = () => {
+    if (!ready) return;
+    onDispose?.("resolved", basis.trim());
+    setAttesting(false);
+    setBasis("");
+  };
+
+  if (attesting) {
+    return (
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="flex flex-col gap-1.5 border-t border-border-subtle px-2.5 py-2"
+      >
+        <span
+          className="text-meta font-semibold uppercase tracking-wider"
+          style={{ color: GAP_INK.strong }}
+        >
+          Where did you check it?
+        </span>
+
+        <div className="flex flex-wrap gap-1">
+          {BASIS_CHIPS.map((chip) => (
+            <button
+              key={chip}
+              type="button"
+              onClick={() => setBasis(chip)}
+              className={cn(
+                "rounded-full border px-2 py-0.5 text-meta transition-colors duration-fast",
+                basis === chip
+                  ? "border-transparent font-medium"
+                  : "border-border text-muted-foreground hover:bg-surface-secondary"
+              )}
+              style={
+                basis === chip ? { background: GAP_INK.tint, color: GAP_INK.strong } : undefined
+              }
+            >
+              {chip}
+            </button>
+          ))}
+        </div>
+
+        <input
+          autoFocus
+          value={basis}
+          onChange={(e) => setBasis(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") record();
+            if (e.key === "Escape") setAttesting(false);
+          }}
+          placeholder="or type it — e.g. tied to the FY24 equity roll-forward, p.3"
+          className="w-full rounded-md border border-border bg-surface px-2 py-1 text-helper placeholder:text-muted-foreground/70"
+        />
+
+        <div className="flex items-center gap-1.5">
+          <Button variant="successSoft" size="xs" disabled={!ready} onClick={record}>
+            <Check />
+            Record and close
+          </Button>
+          <Button variant="ghost" size="xs" onClick={() => setAttesting(false)}>
+            Cancel
+          </Button>
+          <span className="ml-auto text-meta text-muted-foreground">Goes on the audit trail</span>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 border-t border-border-subtle px-2.5 py-2">
+      <Tooltip content="You found what the agent could not — say where, and the line closes with your name against it">
+        <span>
+          <Button
+            variant="successSoft"
+            size="xs"
+            onClick={(e) => {
+              e.stopPropagation();
+              setAttesting(true);
+            }}
+          >
+            <UserCheck />
+            Verified by hand
+          </Button>
+        </span>
+      </Tooltip>
+
+      <Tooltip content={reason?.ask ?? "Ask the preparer for the missing evidence"}>
+        <span>
+          <Button
+            variant="outline"
+            size="xs"
+            onClick={(e) => {
+              e.stopPropagation();
+              onDispose?.("flagged", reason?.ask ?? "Evidence requested from the preparer.");
+            }}
+          >
+            <FileQuestion />
+            Request source
+          </Button>
+        </span>
+      </Tooltip>
+
+      <Tooltip content="Sign the line off with the gap on the record — the report carries it as unsupported">
+        <span>
+          <Button
+            variant="ghost"
+            size="xs"
+            onClick={(e) => {
+              e.stopPropagation();
+              onDispose?.("accepted");
+            }}
+          >
+            <CircleDashed />
+            Accept unverified
+          </Button>
+        </span>
+      </Tooltip>
+    </div>
   );
 }
 
@@ -461,14 +722,17 @@ function PrintedComment({
   onFocus: () => void;
 }) {
   const closed = disposition !== undefined;
-  const outliers = issue.readings.filter((r) => !r.agrees);
-  const agreeing = issue.readings.filter((r) => r.agrees);
+  const gap = issue.kind === "gap";
+  const reason = issue.gapReason ? GAP_META[issue.gapReason] : undefined;
+  const outliers = gap ? [] : issue.readings.filter((r) => !r.agrees);
+  const agreeing = gap ? [] : issue.readings.filter((r) => r.agrees);
   const outlierNames = outliers.map((r) => r.label);
   const working = issue.workingValue ?? item?.valueB;
 
   /* the shape of the disagreement, said once, in words */
-  const shape =
-    issue.shape === "single" && outlierNames.length === 1
+  const shape = gap
+    ? (reason?.label ?? "Could not be verified")
+    : issue.shape === "single" && outlierNames.length === 1
       ? `${outlierNames[0]} is out`
       : SHAPE_META[issue.shape].label;
 
@@ -477,7 +741,7 @@ function PrintedComment({
       onClick={onFocus}
       className={cn(
         "cursor-pointer rounded-md border border-l-2 bg-surface px-3 py-2.5 transition-colors duration-fast",
-        closed ? "border-l-border-strong" : "border-l-critical",
+        closed ? "border-l-border-strong" : gap ? "border-l-[#0E7490]" : "border-l-critical",
         focused ? "border-border-strong bg-[rgba(70,100,220,0.03)]" : "border-border-subtle",
         closed && "opacity-75 hover:opacity-100"
       )}
@@ -486,7 +750,7 @@ function PrintedComment({
         <span
           className={cn(
             "flex h-[18px] w-[18px] shrink-0 translate-y-0.5 items-center justify-center rounded-full text-[10px] font-semibold text-white",
-            closed ? DISPOSITION_META[disposition].className : "bg-critical"
+            closed ? DISPOSITION_META[disposition].className : gap ? "bg-[#0E7490]" : "bg-critical"
           )}
         >
           {number}
@@ -495,7 +759,8 @@ function PrintedComment({
       </div>
 
       <p className="mt-0.5 pl-[26px] text-meta text-muted-foreground">
-        Reconciliation agent · {shape} · {issue.confidence}% confidence
+        Reconciliation agent · {shape} ·{" "}
+        {gap ? `no figure in ${issue.readings.length} sources` : `${issue.confidence}% confidence`}
       </p>
 
       <p className="mt-1.5 pl-[26px] text-helper leading-[18px] text-foreground/90">
@@ -516,7 +781,27 @@ function PrintedComment({
         </div>
       )}
 
-      {issue.kind === "text" ? (
+      {gap ? (
+        item &&
+        working !== undefined && (
+          <dl
+            className="mt-2 ml-[26px] flex flex-col gap-1 border-t border-dashed pt-1.5"
+            style={{ borderColor: DASH }}
+          >
+            <Figure label="Reconciled" value={formatValue(working, item.unit)} strong />
+            {issue.readings.map((row) => (
+              <div key={row.docId} className="flex items-baseline gap-2">
+                <dt className="min-w-0 flex-1 truncate text-helper text-muted-foreground">
+                  {row.label}
+                </dt>
+                <dd className="shrink-0 text-meta" style={{ color: GAP_INK.strong }}>
+                  {row.note ?? "not found"}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        )
+      ) : issue.kind === "text" ? (
         <PrintedPassage issue={issue} project={project} />
       ) : (
         item &&
@@ -544,7 +829,9 @@ function PrintedComment({
       <p className="mt-2 pl-[26px] text-meta text-muted-foreground">
         {closed
           ? `${DISPOSITION_META[disposition].label} · ${item?.reviewer ?? "you"}`
-          : "Open — no decision recorded"}
+          : gap
+            ? "Open — nothing in the sources settles it"
+            : "Open — no decision recorded"}
       </p>
     </li>
   );

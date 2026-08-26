@@ -79,12 +79,15 @@ export function ReconciliationReport({
     return map;
   }, [allIssues]);
 
-  /* a tick where every source agreed, a cross where a reviewer sent it back */
+  /* a tick where every source agreed, a cross where a reviewer sent it back,
+     and a query where there was nothing to agree or disagree with */
   const marks = React.useMemo(() => {
     const seeded: Record<string, Mark> = {};
     project.items.forEach((item) => {
       const issue = allIssues.find((i) => i.itemId === item.id);
       if (!issue) seeded[item.id] = "tick";
+      else if (issue.kind === "gap" && dispositions[issue.id] !== "resolved")
+        seeded[item.id] = "unverified";
       else if (dispositions[issue.id] === "resolved") seeded[item.id] = "tick";
       else if (dispositions[issue.id] === "flagged") seeded[item.id] = "cross";
     });
@@ -92,6 +95,7 @@ export function ReconciliationReport({
   }, [project.items, allIssues, dispositions]);
 
   const openIssues = allIssues.filter((i) => dispositions[i.id] === undefined);
+  const gaps = allIssues.filter((i) => i.kind === "gap");
   const verified = project.items.length - allIssues.filter((i) => i.itemId).length;
 
   /* the first comment in the file is open on arrival, the rest are titles */
@@ -186,7 +190,10 @@ export function ReconciliationReport({
         <div className="flex shrink-0 divide-x divide-border-subtle rounded-lg border border-border-subtle">
           <Stat label="Checked" value={project.items.length} />
           <Stat label="Agree" value={verified} tone="#179864" />
-          <Stat label="Flagged" value={allIssues.length} tone="#DC2626" />
+          <Stat label="Flagged" value={allIssues.length - gaps.length} tone="#DC2626" />
+          {/* stated next to the others, because a run that hides its gaps
+              reports itself as more complete than it is */}
+          {gaps.length > 0 && <Stat label="Unverified" value={gaps.length} tone="#0B5A70" />}
         </div>
 
         <div className="flex shrink-0 items-center gap-2">
