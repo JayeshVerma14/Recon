@@ -6,7 +6,6 @@ import {
   ChevronDown,
   CircleDashed,
   CornerUpLeft,
-  FileQuestion,
   FileSpreadsheet,
   FileText,
   Flag,
@@ -246,7 +245,7 @@ export function CommentCard({
           </button>
         </div>
       ) : gap ? (
-        <GapActions issue={issue} onDispose={onDispose} />
+        <GapActions onDispose={onDispose} />
       ) : (
         <div className="flex flex-wrap items-center gap-1.5 border-t border-border-subtle px-2.5 py-2">
           <Tooltip content="Checked and agreed — the reconciled figure stands">
@@ -375,25 +374,23 @@ function GapLedger({ issue, item }: { issue: Issue; item?: LineItem }) {
 const DASH = "rgba(14,116,144,0.28)";
 
 /**
- * The three things a reviewer can honestly do with a line nobody could check.
+ * The two things a reviewer can honestly do with a line nobody could check:
+ * close it on their own evidence, or sign it off with the gap on the record.
  *
- * "Resolve" is not one of them: agreeing with a figure means agreeing with the
+ * "Resolve" is neither of them: agreeing with a figure means agreeing with the
  * evidence behind it, and there is none. What replaces it is an attestation —
- * the reviewer found what the agent could not, and says where. It is the one
- * control here that refuses to fire without an answer, because a gap closed
- * with a bare click is indistinguishable afterwards from a gap nobody noticed,
- * and that is the hole an auditor gets pulled up on.
+ * the reviewer found what the agent could not, and says where. It refuses to
+ * fire without an answer, because a gap closed with a bare click is
+ * indistinguishable afterwards from a gap nobody noticed, and that is the hole
+ * an auditor gets pulled up on.
  */
 function GapActions({
-  issue,
   onDispose,
 }: {
-  issue: Issue;
   onDispose?: (disposition: Disposition, basis?: string) => void;
 }) {
   const [attesting, setAttesting] = React.useState(false);
   const [basis, setBasis] = React.useState("");
-  const reason = issue.gapReason ? GAP_META[issue.gapReason] : undefined;
   const ready = basis.trim().length > 0;
 
   const record = () => {
@@ -477,22 +474,6 @@ function GapActions({
           >
             <UserCheck />
             Verified by hand
-          </Button>
-        </span>
-      </Tooltip>
-
-      <Tooltip content={reason?.ask ?? "Ask the preparer for the missing evidence"}>
-        <span>
-          <Button
-            variant="outline"
-            size="xs"
-            onClick={(e) => {
-              e.stopPropagation();
-              onDispose?.("flagged", reason?.ask ?? "Evidence requested from the preparer.");
-            }}
-          >
-            <FileQuestion />
-            Request source
           </Button>
         </span>
       </Tooltip>

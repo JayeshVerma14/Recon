@@ -277,9 +277,8 @@ export function ReconcileViewer({
       /*
        * Only a verdict earns a verdict's mark. On a line nobody could check,
        * the one decision that turns the query into a tick is a reviewer saying
-       * they checked it themselves — accepting it, or asking the preparer for
-       * the evidence, both leave the question open, and neither makes the line
-       * wrong, so neither gets a cross.
+       * they checked it themselves. Accepting it leaves the question open, and
+       * it never makes the line wrong, so it never gets a cross.
        */
       const next: Mark = gap
         ? disposition === "resolved"
@@ -297,11 +296,9 @@ export function ReconcileViewer({
           ? `Verified by hand · ${issue.title}`
           : `Resolved · ${issue.title}`
         : disposition === "flagged"
-          ? gap
-            ? `Source requested · ${issue.title}`
-            : `Flagged to the preparer · ${
-                issue.readings.find((r) => !r.agrees)?.label ?? SIDE_META[issue.side].short
-              } · ${issue.title}`
+          ? `Flagged to the preparer · ${
+              issue.readings.find((r) => !r.agrees)?.label ?? SIDE_META[issue.side].short
+            } · ${issue.title}`
           : disposition === "accepted"
             ? `Accepted unverified · ${issue.title}`
             : `Dismissed · ${issue.title}`,
