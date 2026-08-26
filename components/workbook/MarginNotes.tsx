@@ -3,7 +3,7 @@
 import * as React from "react";
 
 import { CommentCard } from "@/components/viewer/CommentCard";
-import { SHAPE_META, type Issue } from "@/lib/issues";
+import { GAP_META, SHAPE_META, type Issue } from "@/lib/issues";
 import type { Disposition } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import type { Project } from "@/lib/types";
@@ -186,9 +186,11 @@ function CollapsedNote({
   closed: boolean;
   onOpen: () => void;
 }) {
-  const outliers = issue.readings.filter((r) => !r.agrees).map((r) => r.label);
-  const shape =
-    issue.shape === "single" && outliers.length === 1
+  const gap = issue.kind === "gap";
+  const outliers = gap ? [] : issue.readings.filter((r) => !r.agrees).map((r) => r.label);
+  const shape = gap
+    ? (issue.gapReason ? GAP_META[issue.gapReason].label : SHAPE_META[issue.shape].label)
+    : issue.shape === "single" && outliers.length === 1
       ? `${outliers[0]} is out`
       : SHAPE_META[issue.shape].label;
 
@@ -198,7 +200,11 @@ function CollapsedNote({
       onClick={onOpen}
       className={cn(
         "w-full rounded-md border border-l-2 bg-surface px-3 py-2 text-left shadow-[0_1px_2px_rgba(10,37,64,0.05)] transition-shadow duration-fast hover:shadow-card-hover",
-        closed ? "border-l-border-strong opacity-70 hover:opacity-100" : "border-l-critical",
+        closed
+          ? "border-l-border-strong opacity-70 hover:opacity-100"
+          : gap
+            ? "border-l-[#0E7490]"
+            : "border-l-critical",
         "border-border-subtle"
       )}
     >
@@ -206,7 +212,7 @@ function CollapsedNote({
         <span
           className={cn(
             "flex h-[18px] w-[18px] shrink-0 translate-y-0.5 items-center justify-center rounded-full text-[10px] font-semibold text-white",
-            closed ? "bg-[#94A3B8]" : "bg-critical"
+            closed ? "bg-[#94A3B8]" : gap ? "bg-[#0E7490]" : "bg-critical"
           )}
         >
           {number}
@@ -214,7 +220,8 @@ function CollapsedNote({
         <span className="min-w-0 flex-1 truncate text-body-sm font-medium">{issue.title}</span>
       </div>
       <p className="truncate pl-[26px] text-meta text-muted-foreground">
-        {shape} · {issue.confidence}%
+        {shape}
+        {gap ? "" : ` · ${issue.confidence}%`}
       </p>
     </button>
   );

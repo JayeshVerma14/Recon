@@ -5,8 +5,14 @@ import type { DocumentMeta, LineItem, Project, StatementId } from "@/lib/types";
  * Three things can disagree between two filings: a number, a word, or the
  * formula that produced the number. They are reviewed the same way but they
  * are not the same evidence, so each carries its own anchor and card.
+ *
+ * A "gap" is the fourth thing, and it is not a disagreement at all: the line
+ * could not be checked, because the evidence to check it against never
+ * arrived. A tick and a cross both mean "we looked". This means "we could not
+ * look", and it is kept apart from the other three so it can never be read as
+ * a verdict.
  */
-export type IssueKind = "value" | "text" | "formula";
+export type IssueKind = "value" | "text" | "formula" | "gap";
 
 /**
  * Which document is the outlier. The reconciled document in the middle is
@@ -23,7 +29,10 @@ export interface SourceReading {
   kind: "pdf" | "xlsx";
   /** Absent when the source does not carry this line at all. */
   value?: number;
+  /** False when no figure could be obtained — see `note` for why. */
   covered: boolean;
+  /** On a gap, what happened when this source was searched. */
+  note?: string;
   agrees: boolean;
   /** Signed difference against the reconciled figure. */
   delta: number;
@@ -35,7 +44,7 @@ export interface SourceReading {
  * unanimous set that still differs from the reconciled figure is the agent's
  * own extraction error.
  */
-export type DisagreementShape = "single" | "split" | "consensus";
+export type DisagreementShape = "single" | "split" | "consensus" | "unverified";
 
 export const SHAPE_META: Record<
   DisagreementShape,
@@ -59,7 +68,73 @@ export const SHAPE_META: Record<
     tint: "rgba(220,38,38,0.10)",
     fg: "#B91C1C",
   },
+  unverified: {
+    label: "Could not be verified",
+    hint: "no evidence either way",
+    tint: "rgba(14,116,144,0.10)",
+    fg: "#0B5A70",
+  },
 };
+
+/* ------------------------------ evidence gaps ------------------------------ */
+
+/**
+ * Why a line could not be checked. The reasons differ and the remedy differs
+ * with them, so the reason is carried on the finding rather than flattened
+ * into one "unknown" bucket — "the page was never uploaded" is a five-second
+ * fix, and "no source carries this line at all" is a question for the
+ * preparer.
+ */
+export type GapReason = "absent" | "unreadable" | "unmapped" | "out_of_range" | "stale";
+
+export const GAP_META: Record<
+  GapReason,
+  { label: string; hint: string; ask: string }
+> = {
+  absent: {
+    label: "Not in any source",
+    hint: "no source document carries this line",
+    ask: "Ask the preparer which schedule supports it",
+  },
+  unreadable: {
+    label: "Found but unreadable",
+    hint: "the figure is on the page and could not be read off it",
+    ask: "Ask for a text copy of the page",
+  },
+  unmapped: {
+    label: "No account mapping",
+    hint: "a source holds the balance in a bucket that maps nowhere",
+    ask: "Ask for the mapping for this account",
+  },
+  out_of_range: {
+    label: "Outside the uploaded pages",
+    hint: "the page or sheet that would carry it was never uploaded",
+    ask: "Ask for the missing pages",
+  },
+  stale: {
+    label: "Only an out-of-period source",
+    hint: "the one source carrying it is from another period",
+    ask: "Ask for the current-period schedule",
+  },
+};
+
+/**
+ * The ink an unverified line is written in. Every other colour in this viewer
+ * carries a verdict — green agrees, red and amber name the document at fault,
+ * violet means the sources split. A line with no verdict borrows none of them:
+ * it gets a hue of its own, and its mark is drawn hollow and dashed so it
+ * still reads as "nothing here" in greyscale, on a printout, or to a reader
+ * who cannot separate the hues at all.
+ */
+export const GAP_INK = {
+  /** The query mark, and chip text. */
+  fg: "#0E7490",
+  /** Small text, where 12px needs the extra contrast. */
+  strong: "#0B5A70",
+  tint: "rgba(14,116,144,0.10)",
+  /** Dashed rings and rules. */
+  edge: "rgba(14,116,144,0.55)",
+} as const;
 
 export interface Issue {
   id: string;
@@ -84,6 +159,9 @@ export interface Issue {
   workingValue?: number;
   pdfValue?: number;
   excelValue?: number;
+
+  /** gap issues — why the line could not be checked. */
+  gapReason?: GapReason;
 
   /** text issues */
   workingText?: string;
@@ -456,6 +534,118 @@ const SINGLE_SOURCE_ISSUES: {
 ];
 
 
+/* ------------------------------ nothing to check ---------------------------- */
+
+/**
+ * Lines the agent could not check at all. These are the dangerous ones,
+ * because a reconciliation that only reports disagreements reads as complete
+ * when it is merely quiet: an unverified line looks exactly like an agreed one
+ * unless the interface says otherwise. Each carries the reason, and a per-source
+ * account of the search, so a reviewer can see that five documents were opened
+ * and none of them settled it.
+ */
+const GAP_ISSUES: {
+  id: string;
+  itemId: string;
+  statement: StatementId;
+  reason: GapReason;
+  explanation: string;
+  /** What happened in each source, by document id. */
+  searched: Record<string, string>;
+}[] = [
+  {
+    id: "gap-inc-1",
+    itemId: "income-14",
+    statement: "income",
+    reason: "absent",
+    explanation:
+      "The reconciled statement reports nil and no source carries the line at all — which is not the same thing as five sources agreeing on zero. Until something supports it, the nil is the agent's assumption rather than a reading.",
+    searched: {
+      A: "Line not printed on the statement",
+      B: "No row on IS_Model",
+      C: "Line not printed",
+      D: "No account mapped to it",
+      E: "Not broken out in the pack",
+    },
+  },
+  {
+    id: "gap-inc-2",
+    itemId: "income-18",
+    statement: "income",
+    reason: "unreadable",
+    explanation:
+      "Per-share figures sit in a footnote table that came through as one merged block on every scanned source. The number is on the page; it could not be read off it.",
+    searched: {
+      A: "Footnote table merged in the scan (p.43)",
+      B: "Cell holds a text label, not a number",
+      C: "Footnote table merged in the scan",
+      D: "Not a trial-balance line",
+      E: "Rounded per-share range only",
+    },
+  },
+  {
+    id: "gap-bal-1",
+    itemId: "balance-20",
+    statement: "balance",
+    reason: "unmapped",
+    explanation:
+      "The trial balance holds 2,150 inside a combined Other liabilities bucket that also feeds two current lines. Nothing on the mapping tab splits it, so no reading can be attributed to this line without guessing.",
+    searched: {
+      A: "Aggregated with provisions",
+      B: "Formula points at a deleted range",
+      C: "Prior-period mapping only",
+      D: "Combined bucket — no split on Mapping",
+      E: "Not broken out in the pack",
+    },
+  },
+  {
+    id: "gap-bal-2",
+    itemId: "balance-22",
+    statement: "balance",
+    reason: "out_of_range",
+    explanation:
+      "Equity is presented on a page that was never part of the upload — the filing jumps from page 47 to page 49. Nothing was searched here, so nothing was found.",
+    searched: {
+      A: "Page 48 missing from the upload",
+      B: "Cover sheet only — no equity tab",
+      C: "Page range not uploaded",
+      D: "Equity accounts outside the extract",
+      E: "Not in the pack",
+    },
+  },
+  {
+    id: "gap-cf-1",
+    itemId: "cashflow-04",
+    statement: "cashflow",
+    reason: "stale",
+    explanation:
+      "The one source carrying this line is the prior-year 10-K. An FY2023 figure cannot verify an FY2024 one, so the reconciled (420) stands on nothing from this period.",
+    searched: {
+      A: "Not separately disclosed",
+      B: "Row present, no value",
+      C: "FY2023 figure only",
+      D: "No deferred-tax movement account",
+      E: "Not in the pack",
+    },
+  },
+  {
+    id: "gap-cf-2",
+    itemId: "cashflow-12",
+    statement: "cashflow",
+    reason: "absent",
+    explanation:
+      "Investing detail is presented net of maturities in every source. No source reports the gross purchases figure the reconciled statement carries.",
+    searched: {
+      A: "Presented net of maturities",
+      B: "Row present, no value",
+      C: "Presented net of maturities",
+      D: "No account mapped to it",
+      E: "Presented net of maturities",
+    },
+  },
+];
+
+
 /* ------------------------------- more sources ------------------------------ */
 
 /**
@@ -579,6 +769,7 @@ export function buildIssues(project: Project): Issue[] {
   const claimed = new Set([
     ...FORMULA_ISSUES.map((f) => f.itemId),
     ...SINGLE_SOURCE_ISSUES.map((f) => f.itemId),
+    ...GAP_ISSUES.map((f) => f.itemId),
   ]);
 
   /* the primary pair disagree with each other */
@@ -689,6 +880,37 @@ export function buildIssues(project: Project): Issue[] {
       };
     }) as (Issue | null)[]).filter((x): x is Issue => x !== null);
 
+  /* nothing to compare — every source was opened and none of them settled it */
+  const gapIssues: Issue[] = GAP_ISSUES.filter((g) => byId.has(g.itemId)).map((g) => {
+    const item = byId.get(g.itemId)!;
+    return {
+      id: g.id,
+      kind: "gap" as const,
+      side: "both" as const,
+      shape: "unverified" as const,
+      statement: g.statement,
+      title: item.account,
+      explanation: g.explanation,
+      /* there is no confidence in a reading that was never taken */
+      confidence: 0,
+      gapReason: g.reason,
+      itemId: g.itemId,
+      workingValue: item.valueB,
+      /* no source is at fault — the evidence simply is not there */
+      disagreeing: [],
+      readings: documentsOf(project).map((doc) => ({
+        docId: doc.id,
+        label: doc.label,
+        kind: doc.kind,
+        value: undefined,
+        covered: false,
+        note: g.searched[doc.id] ?? "Not found",
+        agrees: false,
+        delta: 0,
+      })),
+    };
+  });
+
   const textIssues: Issue[] = TEXT_ISSUES.map((t) => ({
     id: t.id,
     kind: "text" as const,
@@ -706,10 +928,15 @@ export function buildIssues(project: Project): Issue[] {
     missingIn: t.missingIn,
   }));
 
-  const order: Record<IssueKind, number> = { value: 0, formula: 1, text: 2 };
-  return [...valueIssues, ...singleSourceIssues, ...extraOnly, ...formulaIssues, ...textIssues].sort(
-    (a, b) => order[a.kind] - order[b.kind]
-  );
+  const order: Record<IssueKind, number> = { gap: 0, value: 1, formula: 2, text: 3 };
+  return [
+    ...valueIssues,
+    ...singleSourceIssues,
+    ...extraOnly,
+    ...gapIssues,
+    ...formulaIssues,
+    ...textIssues,
+  ].sort((a, b) => order[a.kind] - order[b.kind]);
 }
 
 /** The figure the reconciled document reports, per line. */

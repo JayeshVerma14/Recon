@@ -4,6 +4,7 @@ import * as React from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   Check,
+  CircleDashed,
   Columns3,
   Download,
   FileSpreadsheet,
@@ -19,12 +20,13 @@ import {
 } from "lucide-react";
 
 import { CommentCard } from "@/components/viewer/CommentCard";
-import { DocumentPage, type Mark } from "@/components/viewer/DocumentPage";
+import { DocumentPage, QueryMark, type Mark } from "@/components/viewer/DocumentPage";
 import { ExcelPane } from "@/components/viewer/ExcelPane";
 import { PAGE_WIDTH, PdfBarButton, PdfToolbar, usePdfView } from "@/components/viewer/PdfView";
 import { Button, Progress, Tooltip, useToast } from "@/components/element";
 import { isReviewed } from "@/lib/derive";
 import {
+  GAP_INK,
   SHAPE_META,
   SIDE_META,
   buildIssues,
@@ -44,11 +46,18 @@ import type { Project, StatementId } from "@/lib/types";
 
 type CommentFilter = "open" | "closed" | "all";
 
-const SHAPE_ORDER: DisagreementShape[] = ["consensus", "single", "split"];
+/**
+ * Findings, worst first. A line nobody could check sits second only to a
+ * definite extraction error: it is not wrong, but it is the one thing on the
+ * page that reads as fine when it is not, so it is never buried under the
+ * disagreements.
+ */
+const SHAPE_ORDER: DisagreementShape[] = ["consensus", "unverified", "single", "split"];
 
 const PAGE_ORDER: StatementId[] = ["balance", "income", "cashflow"];
 const KIND_FILTERS: { value: IssueKind | "all"; label: string }[] = [
   { value: "all", label: "All" },
+  { value: "gap", label: "Unverified" },
   { value: "value", label: "Values" },
   { value: "formula", label: "Formulas" },
   { value: "text", label: "Text" },
@@ -138,7 +147,15 @@ export function ReconcileViewer({
     return map;
   }, [allIssues]);
 
-  /* the agent ticks what it reconciled; the analyst edits from there */
+  /*
+   * The agent ticks what it reconciled; the analyst edits from there. A line it
+   * could not check is never ticked — it carries the query mark until a person
+   * decides what to do with it, which is the whole point of the third mark.
+   *
+   * Seeded once per opening, and deliberately not on every change to the items:
+   * recording a decision rewrites the item it belongs to, and re-seeding from
+   * that would wipe the mark the reviewer had just made.
+   */
   React.useEffect(() => {
     if (!open) return;
     const seeded: Record<string, Mark> = {};
@@ -146,8 +163,11 @@ export function ReconcileViewer({
       if (item.status === "matched" || item.status === "approved") seeded[item.id] = "tick";
       if (item.status === "rejected") seeded[item.id] = "cross";
     });
+    allIssues.forEach((issue) => {
+      if (issue.kind === "gap" && issue.itemId) seeded[issue.itemId] = "unverified";
+    });
     setMarks(seeded);
-  }, [open, project.items]);
+  }, [open, project.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   React.useEffect(() => {
     setFocusLineId(focusItemId);
@@ -191,6 +211,7 @@ export function ReconcileViewer({
       if (e.key === "Escape") onClose();
       else if (e.key === "t") setTool("tick");
       else if (e.key === "c") setTool("cross");
+      else if (e.key === "u") setTool("unverified");
       else if (e.key === "n") gotoIssue(1);
       else if (e.key === "p") gotoIssue(-1);
     };
@@ -207,6 +228,7 @@ export function ReconcileViewer({
 
   const ticked = items.filter((i) => marks[i.id] === "tick").length;
   const crossed = items.filter((i) => marks[i.id] === "cross").length;
+  const queried = items.filter((i) => marks[i.id] === "unverified").length;
   const fadedCount = project.items.filter((i) => i.statement !== statement && marks[i.id]).length;
 
   const referenceDoc = documents.find((d) => d.id === reference) ?? project.docA;
@@ -247,23 +269,43 @@ export function ReconcileViewer({
     issues: visibleIssues.filter((i) => i.shape === shape),
   })).filter((group) => group.issues.length > 0);
 
-  const handleDispose = (issue: Issue, disposition: Disposition) => {
-    disposeComment(issue.id, issue.itemId ?? null, disposition);
+  const handleDispose = (issue: Issue, disposition: Disposition, basis?: string) => {
+    disposeComment(issue.id, issue.itemId ?? null, disposition, basis);
+    const gap = issue.kind === "gap";
+
     if (issue.itemId) {
-      setMarks((m) => ({
-        ...m,
-        [issue.itemId!]: disposition === "flagged" ? "cross" : "tick",
-      }));
+      /*
+       * Only a verdict earns a verdict's mark. On a line nobody could check,
+       * the one decision that turns the query into a tick is a reviewer saying
+       * they checked it themselves — accepting it, or asking the preparer for
+       * the evidence, both leave the question open, and neither makes the line
+       * wrong, so neither gets a cross.
+       */
+      const next: Mark = gap
+        ? disposition === "resolved"
+          ? "tick"
+          : "unverified"
+        : disposition === "flagged"
+          ? "cross"
+          : "tick";
+      setMarks((m) => ({ ...m, [issue.itemId!]: next }));
     }
+
     toast(
       disposition === "resolved"
-        ? `Resolved · ${issue.title}`
+        ? gap
+          ? `Verified by hand · ${issue.title}`
+          : `Resolved · ${issue.title}`
         : disposition === "flagged"
-          ? `Flagged to the preparer · ${
-              issue.readings.find((r) => !r.agrees)?.label ?? SIDE_META[issue.side].short
-            } · ${issue.title}`
-          : `Dismissed · ${issue.title}`,
-      disposition === "flagged" ? "info" : "success"
+          ? gap
+            ? `Source requested · ${issue.title}`
+            : `Flagged to the preparer · ${
+                issue.readings.find((r) => !r.agrees)?.label ?? SIDE_META[issue.side].short
+              } · ${issue.title}`
+          : disposition === "accepted"
+            ? `Accepted unverified · ${issue.title}`
+            : `Dismissed · ${issue.title}`,
+      disposition === "resolved" ? "success" : "info"
     );
   };
 
@@ -290,6 +332,16 @@ export function ReconcileViewer({
             <ToolButton active={tool === "cross"} onClick={() => setTool("cross")} tone="bad" hint="C">
               <X />
               Cross
+            </ToolButton>
+            <ToolButton
+              active={tool === "unverified"}
+              onClick={() => setTool("unverified")}
+              tone="query"
+              hint="U"
+              title="Could not be verified — no evidence either way"
+            >
+              <CircleDashed />
+              Unverified
             </ToolButton>
           </div>
 
@@ -319,7 +371,14 @@ export function ReconcileViewer({
         leading={
           <div className="flex items-center gap-0.5">
             {pages.map((page, i) => {
-              const openOnPage = allIssues.filter((x) => x.statement === page && isOpen(x)).length;
+              const openOnPage = allIssues.filter(
+                (x) => x.statement === page && isOpen(x) && x.kind !== "gap"
+              ).length;
+              /* counted apart from the errors: a page whose only open findings
+                 are unverified lines is not a page with mistakes on it */
+              const gapsOnPage = allIssues.filter(
+                (x) => x.statement === page && isOpen(x) && x.kind === "gap"
+              ).length;
               return (
                 <button
                   key={page}
@@ -336,6 +395,17 @@ export function ReconcileViewer({
                   {openOnPage > 0 && (
                     <span className="tabular flex h-4 min-w-4 items-center justify-center rounded-full bg-critical px-1 font-mono text-[10px] text-white">
                       {openOnPage}
+                    </span>
+                  )}
+                  {gapsOnPage > 0 && (
+                    <span
+                      title={`${gapsOnPage} ${
+                        gapsOnPage === 1 ? "line" : "lines"
+                      } could not be verified`}
+                      className="tabular flex h-4 min-w-4 items-center justify-center rounded-full border border-dashed px-1 font-mono text-[10px]"
+                      style={{ borderColor: GAP_INK.edge, color: "#7FD3E8" }}
+                    >
+                      {gapsOnPage}
                     </span>
                   )}
                 </button>
@@ -476,6 +546,16 @@ export function ReconcileViewer({
                   <X className="h-3 w-3 text-critical" />
                   {crossed}
                 </span>
+                {queried > 0 && (
+                  <span
+                    className="inline-flex items-center gap-1 font-medium"
+                    style={{ color: GAP_INK.strong }}
+                    title={`${queried} ${queried === 1 ? "line" : "lines"} could not be verified`}
+                  >
+                    <QueryMark />
+                    {queried}
+                  </span>
+                )}
                 <span>· {items.length} lines</span>
               </span>
               <span className="ml-auto shrink-0 truncate text-meta text-muted-foreground">
@@ -634,6 +714,8 @@ export function ReconcileViewer({
                                   <Flag className="h-2.5 w-2.5" />
                                 ) : group.shape === "consensus" ? (
                                   <FileText className="h-2.5 w-2.5" />
+                                ) : group.shape === "unverified" ? (
+                                  <CircleDashed className="h-2.5 w-2.5" />
                                 ) : (
                                   <GitCompareArrows className="h-2.5 w-2.5" />
                                 )}
@@ -660,7 +742,9 @@ export function ReconcileViewer({
                                   hovered={Boolean(issue.itemId && issue.itemId === hoveredItemId)}
                                   onFocus={() => setFocusIssueId(issue.id)}
                                   onHover={setHoveredItemId}
-                                  onDispose={(disposition) => handleDispose(issue, disposition)}
+                                  onDispose={(disposition, basis) =>
+                                    handleDispose(issue, disposition, basis)
+                                  }
                                   onReopen={() => reopenComment(issue.id)}
                                 />
                               ))}
@@ -673,7 +757,8 @@ export function ReconcileViewer({
                 </div>
 
                 <div className="shrink-0 border-t border-border-subtle px-3 py-2 text-meta text-muted-foreground">
-                  <Kbd>n</Kbd> / <Kbd>p</Kbd> next and previous · <Kbd>t</Kbd> / <Kbd>c</Kbd> mark tool
+                  <Kbd>n</Kbd> / <Kbd>p</Kbd> next and previous · <Kbd>t</Kbd> / <Kbd>c</Kbd> /{" "}
+                  <Kbd>u</Kbd> mark tool
                 </div>
               </div>
             </motion.aside>
@@ -722,24 +807,29 @@ function ToolButton({
   onClick,
   tone,
   hint,
+  title,
   children,
 }: {
   active: boolean;
   onClick: () => void;
-  tone: "ok" | "bad";
+  tone: "ok" | "bad" | "query";
   hint: string;
+  title?: string;
   children: React.ReactNode;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      title={title}
       className={cn(
         "inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-body-sm font-medium transition-colors duration-fast [&_svg]:size-3.5",
         active
           ? tone === "ok"
             ? "bg-[rgba(23,152,100,0.12)] text-[#0F7048]"
-            : "bg-[rgba(220,38,38,0.12)] text-[#B91C1C]"
+            : tone === "bad"
+              ? "bg-[rgba(220,38,38,0.12)] text-[#B91C1C]"
+              : "bg-[rgba(14,116,144,0.12)] text-[#0B5A70]"
           : "text-muted-foreground hover:bg-surface-secondary"
       )}
     >

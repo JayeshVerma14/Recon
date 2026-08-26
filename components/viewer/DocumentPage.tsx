@@ -6,11 +6,25 @@ import { Check, Minus, X } from "lucide-react";
 import { effectiveValue, formatValue } from "@/lib/derive";
 import { statementLabel } from "@/lib/mock";
 import { cn } from "@/lib/utils";
-import { implicates, type DocNote, type Issue, type SourceReading } from "@/lib/issues";
+import {
+  GAP_INK,
+  GAP_META,
+  implicates,
+  type DocNote,
+  type Issue,
+  type SourceReading,
+} from "@/lib/issues";
 import type { Disposition } from "@/lib/store";
 import type { LineItem, Project, StatementId } from "@/lib/types";
 
-export type Mark = "tick" | "cross";
+/**
+ * The three marks a reviewer can leave on a line. Tick and cross are verdicts —
+ * checked and agreed, checked and wrong. "unverified" is the absence of one:
+ * the line could not be checked at all. It is deliberately not drawn as a third
+ * verdict, because reading it as a mild cross is exactly the mistake that lets
+ * an unsupported figure through.
+ */
+export type Mark = "tick" | "cross" | "unverified";
 
 export function DocumentPage({
   project,
@@ -115,8 +129,12 @@ export function DocumentPage({
             const shows = issue !== undefined && (variant === "working" || implicates(issue, "pdf"));
             const number = shows ? issueNumber.get(issue!.id) : undefined;
             const disposition = issue ? dispositions[issue.id] : undefined;
-            /* focus + context: out-of-lens findings stay on the page, quietened */
-            const inLens = !lensDocId || (issue !== undefined && implicates(issue, lensDocId));
+            /* focus + context: out-of-lens findings stay on the page, quietened.
+               A gap names no document at fault, so no lens can exclude it. */
+            const inLens =
+              !lensDocId ||
+              issue?.kind === "gap" ||
+              (issue !== undefined && implicates(issue, lensDocId));
             const focused =
               item.id === focusItemId || (issue !== undefined && issue.id === focusIssueId);
             const linked = item.id === hoveredItemId;
@@ -147,11 +165,37 @@ export function DocumentPage({
                     {item.account}
                     {mark === "tick" && <Check className="h-3 w-3 text-[#179864]" strokeWidth={3} />}
                     {mark === "cross" && <X className="h-3 w-3 text-[#DC2626]" strokeWidth={3} />}
+                    {mark === "unverified" && (
+                      <QueryMark
+                        title={
+                          issue?.gapReason
+                            ? `Could not be verified — ${GAP_META[
+                                issue.gapReason
+                              ].label.toLowerCase()}`
+                            : "Could not be verified"
+                        }
+                      />
+                    )}
                   </span>
                 </td>
 
                 <td className="relative py-[3px] text-right font-mono text-[10px] tabular-nums text-[#1B2733]">
-                  <span className={cn(item.isSubtotal && "font-semibold")}>
+                  <span
+                    className={cn(item.isSubtotal && "font-semibold")}
+                    /* an unsupported figure is underlined where it stands, so the
+                       page still shows it with the marks column out of view */
+                    style={
+                      mark === "unverified"
+                        ? {
+                            textDecorationLine: "underline",
+                            textDecorationStyle: "dashed",
+                            textDecorationColor: GAP_INK.edge,
+                            textDecorationThickness: "1px",
+                            textUnderlineOffset: "2px",
+                          }
+                        : undefined
+                    }
+                  >
                     {formatValue(value(item), item.unit)}
                   </span>
                   {number !== undefined && (
@@ -164,18 +208,12 @@ export function DocumentPage({
                       }}
                       className={cn(
                         "ml-1 inline-flex h-3.5 w-3.5 -translate-y-0.5 items-center justify-center rounded-full align-middle text-[8px] font-semibold text-white",
-                        BADGE_BG[disposition ?? "open"],
+                        BADGE_BG[badgeTone(issue, disposition)],
                         !inLens && "opacity-30 saturate-0",
                         issue?.id === focusIssueId && "ring-2 ring-[#E0A800]"
                       )}
                     >
-                      {disposition === "resolved" ? (
-                        <Check className="h-2 w-2" strokeWidth={4} />
-                      ) : disposition === "dismissed" ? (
-                        <Minus className="h-2 w-2" strokeWidth={4} />
-                      ) : (
-                        number
-                      )}
+                      <BadgeGlyph n={number} disposition={disposition} />
                     </button>
                   )}
                 </td>
@@ -315,9 +353,12 @@ function HighlightedText({
 }
 
 /**
- * One cell per source: filled where that source agrees with the reconciled
- * figure, hollow red where it does not. Reading down a column shows a document
- * that is wrong everywhere; reading across a row shows a contested account.
+ * One cell per source: filled green where that source agrees with the
+ * reconciled figure, filled red where it does not, and left as an empty dashed
+ * outline where the source carried no figure to compare at all. Reading down a
+ * column shows a document that is wrong everywhere; reading across a row shows
+ * a contested account — or, where the whole row is empty, one that nothing in
+ * the set supports.
  */
 function AgreementStrip({
   documents,
@@ -334,16 +375,24 @@ function AgreementStrip({
         const reading = readings?.find((r) => r.docId === doc.id);
         /* no finding on this line means every source agreed */
         const agrees = reading ? reading.agrees : true;
+        const missing = reading ? !reading.covered : false;
         const dimmed = lensDocId !== null && lensDocId !== doc.id;
         return (
           <span
             key={doc.id}
-            title={`${doc.label} — ${agrees ? "agrees" : "differs"}`}
+            title={`${doc.label} — ${
+              missing ? (reading?.note ?? "no figure to compare") : agrees ? "agrees" : "differs"
+            }`}
             className={cn(
               "block h-[7px] w-[7px] rounded-[1px]",
-              agrees ? "bg-[#B7DFC9]" : "bg-[#E4746F]",
+              missing
+                ? "border border-dashed bg-transparent"
+                : agrees
+                  ? "bg-[#B7DFC9]"
+                  : "bg-[#E4746F]",
               dimmed && "opacity-30"
             )}
+            style={missing ? { borderColor: GAP_INK.edge } : undefined}
           />
         );
       })}
@@ -351,12 +400,65 @@ function AgreementStrip({
   );
 }
 
-const BADGE_BG: Record<Disposition | "open", string> = {
+const BADGE_BG: Record<Disposition | "open" | "query", string> = {
   open: "bg-critical",
+  /* an open gap is not an error — it is an unanswered question */
+  query: "bg-[#0E7490]",
   resolved: "bg-[#179864]",
   flagged: "bg-[#F59E0B]",
   dismissed: "bg-[#94A3B8]",
+  accepted: "bg-[#0B5A70]",
 };
+
+/** Red for a difference, teal for a question, the disposition once there is one. */
+function badgeTone(issue: Issue | undefined, disposition?: Disposition) {
+  if (disposition) return disposition;
+  return issue?.kind === "gap" ? "query" : "open";
+}
+
+function BadgeGlyph({ n, disposition }: { n: number; disposition?: Disposition }) {
+  if (disposition === "resolved") return <Check className="h-2 w-2" strokeWidth={4} />;
+  if (disposition === "dismissed") return <Minus className="h-2 w-2" strokeWidth={4} />;
+  /* accepted keeps the question mark: the line was signed off, not answered */
+  if (disposition === "accepted") return <>?</>;
+  return <>{n}</>;
+}
+
+/**
+ * The unverified mark. Hollow, with a dashed ring, because the shape has to
+ * carry the meaning on its own — a reader who cannot separate teal from green,
+ * or who printed the page in black and white, still sees a ring that was never
+ * filled in and a question that was never answered.
+ */
+export function QueryMark({ title }: { title?: string }) {
+  const label = title ?? "Could not be verified";
+  return (
+    <svg
+      viewBox="0 0 12 12"
+      /* sized in attributes as well as classes: an icon that falls back to its
+         intrinsic size takes the whole page with it */
+      width="12"
+      height="12"
+      role="img"
+      aria-label={label}
+      className="h-3 w-3 shrink-0"
+    >
+      <title>{label}</title>
+      <circle
+        cx="6"
+        cy="6"
+        r="5.1"
+        fill="none"
+        stroke={GAP_INK.edge}
+        strokeWidth="1.4"
+        strokeDasharray="2.3 1.7"
+      />
+      <text x="6" y="8.7" textAnchor="middle" fontSize="7.5" fontWeight="700" fill={GAP_INK.fg}>
+        ?
+      </text>
+    </svg>
+  );
+}
 
 function NumberBadge({
   n,
@@ -375,13 +477,7 @@ function NumberBadge({
         focused && "ring-2 ring-[#E0A800]"
       )}
     >
-      {disposition === "resolved" ? (
-        <Check className="h-2 w-2" strokeWidth={4} />
-      ) : disposition === "dismissed" ? (
-        <Minus className="h-2 w-2" strokeWidth={4} />
-      ) : (
-        n
-      )}
+      <BadgeGlyph n={n} disposition={disposition} />
     </span>
   );
 }
