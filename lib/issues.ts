@@ -87,34 +87,26 @@ export const SHAPE_META: Record<
  */
 export type GapReason = "absent" | "unreadable" | "unmapped" | "out_of_range" | "stale";
 
-export const GAP_META: Record<
-  GapReason,
-  { label: string; hint: string; ask: string }
-> = {
+export const GAP_META: Record<GapReason, { label: string; hint: string }> = {
   absent: {
     label: "Not in any source",
     hint: "no source document carries this line",
-    ask: "Ask the preparer which schedule supports it",
   },
   unreadable: {
     label: "Found but unreadable",
     hint: "the figure is on the page and could not be read off it",
-    ask: "Ask for a text copy of the page",
   },
   unmapped: {
     label: "No account mapping",
     hint: "a source holds the balance in a bucket that maps nowhere",
-    ask: "Ask for the mapping for this account",
   },
   out_of_range: {
     label: "Outside the uploaded pages",
     hint: "the page or sheet that would carry it was never uploaded",
-    ask: "Ask for the missing pages",
   },
   stale: {
     label: "Only an out-of-period source",
     hint: "the one source carrying it is from another period",
-    ask: "Ask for the current-period schedule",
   },
 };
 
