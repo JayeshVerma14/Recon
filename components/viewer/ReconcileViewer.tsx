@@ -7,7 +7,6 @@ import {
   CircleDashed,
   Columns3,
   Download,
-  FileSpreadsheet,
   Flag,
   FileText,
   GitCompareArrows,
@@ -20,9 +19,15 @@ import {
 } from "lucide-react";
 
 import { CommentCard } from "@/components/viewer/CommentCard";
+import {
+  BulkCommentBar,
+  BulkUndoBar,
+  useCommentSelection,
+} from "@/components/viewer/CommentSelection";
 import { DocumentPage, QueryMark, type Mark } from "@/components/viewer/DocumentPage";
 import { ExcelPane } from "@/components/viewer/ExcelPane";
 import { PAGE_WIDTH, PdfBarButton, PdfToolbar, usePdfView } from "@/components/viewer/PdfView";
+import { SourceSwitcher } from "@/components/viewer/SourceSwitcher";
 import { Button, Progress, Tooltip, useToast } from "@/components/element";
 import { isReviewed } from "@/lib/derive";
 import {
@@ -147,6 +152,44 @@ export function ReconcileViewer({
     return map;
   }, [allIssues]);
 
+  const visibleIssues = React.useMemo(
+    () =>
+      pageIssues
+        .filter((i) => (filter === "all" ? true : filter === "open" ? isOpen(i) : !isOpen(i)))
+        .filter((i) => (kind === "all" ? true : i.kind === kind)),
+    [pageIssues, filter, kind, isOpen]
+  );
+
+  /* grouped by the document at fault, so a filing error and a workbook error
+     are never mixed into one undifferentiated list */
+  const groupedIssues = React.useMemo(
+    () =>
+      SHAPE_ORDER.map((shape) => ({
+        shape,
+        issues: visibleIssues.filter((i) => i.shape === shape),
+      })).filter((group) => group.issues.length > 0),
+    [visibleIssues]
+  );
+
+  /* the order the rail actually reads in — what a shift-click spans */
+  const orderedIssueIds = React.useMemo(
+    () => groupedIssues.flatMap((g) => g.issues.map((i) => i.id)),
+    [groupedIssues]
+  );
+  const selection = useCommentSelection(orderedIssueIds);
+  const [bulkUndo, setBulkUndo] = React.useState<{
+    verb: string;
+    ids: string[];
+    marks: Record<string, Mark | undefined>;
+  } | null>(null);
+
+  /** Open findings laid at one source's door. */
+  const openAgainst = React.useCallback(
+    (docId: string) => pageIssues.filter((i) => implicates(i, docId) && isOpen(i)).length,
+    [pageIssues, isOpen]
+  );
+  const unsettled = pageIssues.filter((i) => i.kind === "gap" && isOpen(i)).length;
+
   /*
    * The agent ticks what it reconciled; the analyst edits from there. A line it
    * could not check is never ticked — it carries the query mark until a person
@@ -190,6 +233,21 @@ export function ReconcileViewer({
     if (focusIssue.itemId) setFocusLineId(focusIssue.itemId);
   }, [focusIssue?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  /* the shortcut handler binds once; these keep it reading current state */
+  const selectionRef = React.useRef(selection);
+  const focusRef = React.useRef(focusIssueId);
+  const orderedRef = React.useRef(orderedIssueIds);
+  const documentsRef = React.useRef(documents);
+  const sourceMenuRef = React.useRef(false);
+  const referenceRef = React.useRef(reference);
+  React.useEffect(() => {
+    selectionRef.current = selection;
+    focusRef.current = focusIssueId;
+    orderedRef.current = orderedIssueIds;
+    documentsRef.current = documents;
+    referenceRef.current = reference;
+  });
+
   const gotoIssue = React.useCallback(
     (direction: 1 | -1) => {
       if (!openIssues.length) return;
@@ -208,15 +266,38 @@ export function ReconcileViewer({
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
       if (["INPUT", "TEXTAREA"].includes(target.tagName)) return;
-      if (e.key === "Escape") onClose();
-      else if (e.key === "t") setTool("tick");
+      /* escape leaves the innermost thing first: an open menu, then a
+         selection, and only then the viewer itself */
+      if (e.key === "Escape") {
+        if (sourceMenuRef.current) return;
+        if (selectionRef.current.active) selectionRef.current.clear();
+        else onClose();
+      } else if (e.key === "t") setTool("tick");
       else if (e.key === "c") setTool("cross");
       else if (e.key === "u") setTool("unverified");
       else if (e.key === "n") gotoIssue(1);
       else if (e.key === "p") gotoIssue(-1);
+      else if (e.key === "x") {
+        const focused = focusRef.current;
+        if (focused) {
+          e.preventDefault();
+          selectionRef.current.toggle(focused, e.shiftKey);
+        }
+      } else if (e.key === "A" && e.shiftKey) {
+        e.preventDefault();
+        selectionRef.current.add(orderedRef.current);
+      } else if (e.key === "[" || e.key === "]") {
+        const docs = documentsRef.current;
+        const at = docs.findIndex((d) => d.id === referenceRef.current);
+        const step = e.key === "]" ? 1 : -1;
+        const next = docs[(at + step + docs.length) % docs.length];
+        if (next) setReference(next.id);
+      }
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    /* captured, so the viewer decides what escape means before the menu that
+       is about to close swallows the evidence that it was open */
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
   }, [open, onClose, gotoIssue]);
 
   if (!open) return null;
@@ -258,18 +339,13 @@ export function ReconcileViewer({
     });
   };
 
-  const visibleIssues = pageIssues
-    .filter((i) => (filter === "all" ? true : filter === "open" ? isOpen(i) : !isOpen(i)))
-    .filter((i) => (kind === "all" ? true : i.kind === kind));
-
-  /* grouped by the document at fault, so a filing error and a workbook error
-     are never mixed into one undifferentiated list */
-  const groupedIssues = SHAPE_ORDER.map((shape) => ({
-    shape,
-    issues: visibleIssues.filter((i) => i.shape === shape),
-  })).filter((group) => group.issues.length > 0);
-
-  const handleDispose = (issue: Issue, disposition: Disposition, basis?: string) => {
+  const handleDispose = (
+    issue: Issue,
+    disposition: Disposition,
+    basis?: string,
+    /* a bulk decision reports itself once, not once per comment */
+    quiet = false
+  ) => {
     disposeComment(issue.id, issue.itemId ?? null, disposition, basis);
     const gap = issue.kind === "gap";
 
@@ -290,6 +366,8 @@ export function ReconcileViewer({
       setMarks((m) => ({ ...m, [issue.itemId!]: next }));
     }
 
+    if (quiet) return;
+
     toast(
       disposition === "resolved"
         ? gap
@@ -305,6 +383,71 @@ export function ReconcileViewer({
       disposition === "resolved" ? "success" : "info"
     );
   };
+
+  const selectedIssues = selection.ids
+    .map((id) => pageIssues.find((i) => i.id === id))
+    .filter((i): i is Issue => Boolean(i))
+    .map((issue) => ({ issue, open: isOpen(issue) }));
+
+  const BULK_VERB: Record<Disposition, string> = {
+    resolved: "resolved",
+    flagged: "flagged to the preparer",
+    dismissed: "dismissed",
+    accepted: "accepted unverified",
+  };
+
+  /**
+   * One decision, applied to everything selected that is still open.
+   *
+   * Undo here means what Reopen means on a single card: the comments come back,
+   * and the marks go back to what they were. The audit trail does not rewind —
+   * an entry that was written stays written, which is the point of having one.
+   */
+  const applyBulk = (disposition: Disposition, basis?: string) => {
+    const targets = selectedIssues.filter((s) => s.open).map((s) => s.issue);
+    if (!targets.length) return;
+
+    const before: Record<string, Mark | undefined> = {};
+    targets.forEach((issue) => {
+      if (issue.itemId) before[issue.itemId] = marks[issue.itemId];
+    });
+
+    targets.forEach((issue) => handleDispose(issue, disposition, basis, true));
+    setBulkUndo({ verb: BULK_VERB[disposition], ids: targets.map((i) => i.id), marks: before });
+    selection.clear();
+    toast(
+      `${targets.length} ${targets.length === 1 ? "comment" : "comments"} ${BULK_VERB[disposition]}`,
+      disposition === "resolved" ? "success" : "info"
+    );
+  };
+
+  const undoBulk = () => {
+    if (!bulkUndo) return;
+    bulkUndo.ids.forEach((id) => reopenComment(id));
+    setMarks((current) => {
+      const next = { ...current };
+      Object.entries(bulkUndo.marks).forEach(([itemId, mark]) => {
+        if (mark) next[itemId] = mark;
+        else delete next[itemId];
+      });
+      return next;
+    });
+    setBulkUndo(null);
+  };
+
+  const reopenSelected = () => {
+    const closed = selectedIssues.filter((s) => !s.open).map((s) => s.issue);
+    closed.forEach((issue) => reopenComment(issue.id));
+    selection.clear();
+    toast(`${closed.length} ${closed.length === 1 ? "comment" : "comments"} reopened`, "info");
+  };
+
+  const narrowSelection = (want: "gap" | "disagreement") =>
+    selection.remove(
+      selectedIssues
+        .filter((s) => (want === "gap" ? s.issue.kind !== "gap" : s.issue.kind === "gap"))
+        .map((s) => s.issue.id)
+    );
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-surface">
@@ -443,38 +586,19 @@ export function ReconcileViewer({
         <div className="grid min-h-0 min-w-0 flex-1 grid-cols-1 gap-3 lg:grid-cols-2">
           {/* reference — PDF filing or the supporting workbook */}
           <div className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-lg border border-border">
-            <div className="flex h-10 shrink-0 items-center gap-1 overflow-x-auto scrollbar-thin border-b border-border-subtle px-2">
-              {documents.map((doc) => {
-                const isActive = reference === doc.id;
-                const isSheet = doc.kind === "xlsx";
-                const flagged = pageIssues.filter((i) => implicates(i, doc.id) && isOpen(i)).length;
-                return (
-                  <button
-                    key={doc.id}
-                    type="button"
-                    onClick={() => setReference(doc.id)}
-                    title={doc.fileName}
-                    className={cn(
-                      "inline-flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-helper transition-colors duration-fast",
-                      isActive
-                        ? "bg-[rgba(70,100,220,0.08)] font-medium text-[#2F45A8]"
-                        : "text-muted-foreground hover:bg-surface-secondary"
-                    )}
-                  >
-                    {isSheet ? (
-                      <FileSpreadsheet className="h-3.5 w-3.5 text-[#179864]" />
-                    ) : (
-                      <FileText className="h-3.5 w-3.5 text-[#DC2626]" />
-                    )}
-                    <span className="max-w-[130px] truncate">{doc.label}</span>
-                    {flagged > 0 && (
-                      <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-critical px-1 font-mono text-[10px] text-white">
-                        {flagged}
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
+            <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border-subtle px-2">
+              <SourceSwitcher
+                documents={documents}
+                activeId={reference}
+                onSelect={setReference}
+                openOf={openAgainst}
+                unsettled={unsettled}
+                implicatedIds={focusIssue?.disagreeing ?? []}
+                focusTitle={focusIssue && focusIssue.disagreeing.length ? focusIssue.title : undefined}
+                onOpenChange={(menuOpen) => {
+                  sourceMenuRef.current = menuOpen;
+                }}
+              />
               <span className="ml-auto shrink-0 pl-2 text-meta text-muted-foreground">
                 {referenceDoc.kind === "xlsx" ? "Source workbook" : "Reference · p.1"}
               </span>
@@ -701,7 +825,7 @@ export function ReconcileViewer({
                         const meta = SHAPE_META[group.shape];
                         const openInGroup = group.issues.filter(isOpen).length;
                         return (
-                          <section key={group.shape} className="flex flex-col gap-1.5">
+                          <section key={group.shape} className="group/section flex flex-col gap-1.5">
                             <header className="flex items-center gap-1.5 px-0.5">
                               <span
                                 className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-meta font-semibold uppercase tracking-wider"
@@ -721,8 +845,22 @@ export function ReconcileViewer({
                               <span className="tabular font-mono text-meta text-muted-foreground">
                                 {openInGroup} open · {group.issues.length}
                               </span>
-                              <span className="ml-auto truncate text-meta text-muted-foreground">
-                                {meta.hint}
+                              {/* findings cluster by cause, so the cluster is the
+                                  unit a reviewer most often decides at once */}
+                              {/* the hint gives way to the control on approach,
+                                  but the control keeps its place in the tab
+                                  order — it is never display:none */}
+                              <span className="relative ml-auto flex min-w-0 items-center justify-end">
+                                <span className="truncate text-meta text-muted-foreground transition-opacity duration-fast group-hover/section:opacity-0 group-focus-within/section:opacity-0">
+                                  {meta.hint}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => selection.add(group.issues.map((i) => i.id))}
+                                  className="absolute right-0 shrink-0 rounded text-meta text-brand opacity-0 transition-opacity duration-fast hover:underline focus-visible:opacity-100 focus-visible:outline focus-visible:outline-1 focus-visible:outline-brand group-hover/section:opacity-100 group-focus-within/section:opacity-100"
+                                >
+                                  Select {group.issues.length}
+                                </button>
                               </span>
                             </header>
 
@@ -737,6 +875,10 @@ export function ReconcileViewer({
                                   disposition={dispositions[issue.id]}
                                   focused={focusIssueId === issue.id}
                                   hovered={Boolean(issue.itemId && issue.itemId === hoveredItemId)}
+                                  selectable
+                                  selected={selection.has(issue.id)}
+                                  selectionActive={selection.active}
+                                  onSelectToggle={(extend) => selection.toggle(issue.id, extend)}
                                   onFocus={() => setFocusIssueId(issue.id)}
                                   onHover={setHoveredItemId}
                                   onDispose={(disposition, basis) =>
@@ -753,9 +895,35 @@ export function ReconcileViewer({
                   )}
                 </div>
 
+                <AnimatePresence initial={false} mode="wait">
+                  {selection.ids.length > 0 ? (
+                    <BulkCommentBar
+                      key="bulk"
+                      selected={selectedIssues}
+                      visibleCount={visibleIssues.length}
+                      allVisibleSelected={
+                        visibleIssues.length > 0 && selection.ids.length === visibleIssues.length
+                      }
+                      onApply={applyBulk}
+                      onReopen={reopenSelected}
+                      onClear={selection.clear}
+                      onSelectAllVisible={() => selection.add(orderedIssueIds)}
+                      onNarrow={narrowSelection}
+                    />
+                  ) : bulkUndo ? (
+                    <BulkUndoBar
+                      key="undo"
+                      label={bulkUndo.verb}
+                      count={bulkUndo.ids.length}
+                      onUndo={undoBulk}
+                      onDismiss={() => setBulkUndo(null)}
+                    />
+                  ) : null}
+                </AnimatePresence>
+
                 <div className="shrink-0 border-t border-border-subtle px-3 py-2 text-meta text-muted-foreground">
-                  <Kbd>n</Kbd> / <Kbd>p</Kbd> next and previous · <Kbd>t</Kbd> / <Kbd>c</Kbd> /{" "}
-                  <Kbd>u</Kbd> mark tool
+                  <Kbd>n</Kbd> / <Kbd>p</Kbd> next · <Kbd>x</Kbd> select · <Kbd>t</Kbd> /{" "}
+                  <Kbd>c</Kbd> / <Kbd>u</Kbd> mark
                 </div>
               </div>
             </motion.aside>

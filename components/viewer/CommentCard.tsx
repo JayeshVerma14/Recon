@@ -16,6 +16,7 @@ import {
   X,
 } from "lucide-react";
 
+import { CommentSelectHandle } from "@/components/viewer/CommentSelection";
 import { QueryMark } from "@/components/viewer/DocumentPage";
 import { Button, Tooltip } from "@/components/element";
 import { formatDifference, formatValue } from "@/lib/derive";
@@ -70,6 +71,10 @@ export function CommentCard({
   focused,
   hovered,
   mode = "work",
+  selectable = false,
+  selected = false,
+  selectionActive = false,
+  onSelectToggle,
   onFocus,
   onHover,
   onDispose,
@@ -82,6 +87,12 @@ export function CommentCard({
   disposition?: Disposition;
   focused: boolean;
   hovered: boolean;
+  /** The rail lets comments be decided in bulk, so the badge doubles as a handle. */
+  selectable?: boolean;
+  selected?: boolean;
+  /** Something else in the rail is selected — every handle stays visible. */
+  selectionActive?: boolean;
+  onSelectToggle?: (extend: boolean) => void;
   /**
    * "read" is the printed-page reading of a comment: the agent's finding as
    * text, with no way to act on it — the same thing you would see if you had
@@ -129,21 +140,28 @@ export function CommentCard({
       onMouseLeave={() => onHover(null)}
       onClick={onFocus}
       className={cn(
-        "cursor-pointer rounded-lg border bg-surface transition-colors duration-fast",
+        "group/comment cursor-pointer rounded-lg border bg-surface transition-colors duration-fast",
         closed ? "border-border-subtle" : "border-border",
         (focused || hovered) && "border-brand/50 shadow-card-hover",
+        selected && "border-brand bg-[rgba(70,100,220,0.04)]",
         closed && "opacity-70 hover:opacity-100"
       )}
     >
       <div className="flex items-start gap-2 px-2.5 pt-2.5">
-        <span
-          className={cn(
-            "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold text-white",
-            closed ? DISPOSITION_META[disposition].className : gap ? "bg-[#0E7490]" : "bg-critical"
-          )}
-        >
-          {closed ? React.createElement(DISPOSITION_META[disposition].icon, { className: "h-3 w-3", strokeWidth: 3 }) : number}
-        </span>
+        {selectable ? (
+          <CommentSelectHandle
+            selected={selected}
+            active={selectionActive}
+            label={issue.title}
+            onToggle={(extend) => onSelectToggle?.(extend)}
+          >
+            <Badge closed={closed} disposition={disposition} gap={gap} number={number} />
+          </CommentSelectHandle>
+        ) : (
+          <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center">
+            <Badge closed={closed} disposition={disposition} gap={gap} number={number} />
+          </span>
+        )}
 
         <div className="flex min-w-0 flex-1 flex-col gap-1">
           <span className="text-body-sm font-medium leading-5">{issue.title}</span>
@@ -305,6 +323,43 @@ export function CommentCard({
         </div>
       )}
     </li>
+  );
+}
+
+/**
+ * The comment's number, or the mark its decision left. Pulled out so the
+ * selection handle can sit in the same 20px the number occupies rather than
+ * pushing the card's whole header across.
+ */
+function Badge({
+  closed,
+  disposition,
+  gap,
+  number,
+}: {
+  closed: boolean;
+  disposition?: Disposition;
+  gap: boolean;
+  number: number;
+}) {
+  return (
+    <span
+      className={cn(
+        "flex h-5 w-5 items-center justify-center rounded-full text-[11px] font-semibold text-white",
+        closed && disposition
+          ? DISPOSITION_META[disposition].className
+          : gap
+            ? "bg-[#0E7490]"
+            : "bg-critical"
+      )}
+    >
+      {closed && disposition
+        ? React.createElement(DISPOSITION_META[disposition].icon, {
+            className: "h-3 w-3",
+            strokeWidth: 3,
+          })
+        : number}
+    </span>
   );
 }
 
