@@ -15,13 +15,23 @@ import {
   type Issue,
   type SourceReading,
 } from "@/lib/issues";
-import { NOW, statementLabel } from "@/lib/mock";
+import { NOW, statementLabel, statementMeta } from "@/lib/mock";
 import { relativeTime } from "@/lib/derive";
 import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import type { Project, StatementId } from "@/lib/types";
 
-const PAGE_ORDER: StatementId[] = ["balance", "income", "cashflow"];
+/* every section the run covers, in the order the filing prints them */
+const sectionsOf = (project: Project): StatementId[] => project.statements;
+
+/** Each section was read against its own source, so the column says which. */
+function referenceLabel(project: Project, statement: StatementId) {
+  const refId = statementMeta(statement)?.referenceDoc;
+  const doc = [project.docA, project.docB, ...(project.extraDocs ?? [])].find(
+    (d) => d.id === refId
+  );
+  return doc?.label ?? project.docA.label;
+}
 const NOTE_WIDTH = 296;
 const NOTE_GAP = 20;
 
@@ -52,10 +62,7 @@ export function ReconciliationReport({
     return map;
   }, [allIssues]);
 
-  const pages = React.useMemo(
-    () => PAGE_ORDER.filter((s) => project.statements.includes(s)),
-    [project.statements]
-  );
+  const pages = React.useMemo(() => sectionsOf(project), [project]);
 
   const view = usePdfView({ pageCount: pages.length, gutter: NOTE_WIDTH + NOTE_GAP });
   const [activeIssueId, setActiveIssueId] = React.useState<string | null>(null);
@@ -119,7 +126,7 @@ export function ReconciliationReport({
     setFocusIssueId(issue.id);
   };
 
-  const fileName = `${project.docA.fileName.replace(/\.[^.]+$/, "")}_reconciled.pdf`;
+  const fileName = `${project.docB.fileName.replace(/\.[^.]+$/, "")}_reconciled.pdf`;
 
   /* one node per page, shared by the canvas and the thumbnail rail */
   const pageNodes = pages.map((statement) => (
@@ -130,7 +137,7 @@ export function ReconciliationReport({
       items={project.items.filter((i) => i.statement === statement)}
       notes={notesForStatement(statement)}
       variant="working"
-      periods={[project.period, project.comparisonPeriod ?? "FY2023"]}
+      periods={[project.docB.label, referenceLabel(project, statement)]}
       marks={marks}
       issueByItem={issueByItem}
       textIssues={allIssues.filter((i) => i.statement === statement && i.kind === "text")}

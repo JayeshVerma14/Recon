@@ -24,15 +24,18 @@ export interface Sheet {
   statement?: StatementId;
 }
 
-const SHEET_NAME: Record<StatementId, (period: string) => string> = {
-  income: (p) => `Income-Statement-12M-${p.replace(/\D/g, "")}`,
-  balance: (p) => `Balance-Sheet-${p.replace(/\D/g, "")}`,
-  cashflow: (p) => `Cash-Flow-12M-${p.replace(/\D/g, "")}`,
-};
+/**
+ * The tab a section lands on when the run is exported. Sections come from the
+ * workbook the agent wrote, so the tab keeps that name — Excel allows 31
+ * characters and no colons, which is the only reason this does any work.
+ */
+function sheetName(statement: StatementId) {
+  return (statementLabel(statement) || statement).replace(/[:\/?*\[\]]/g, "").slice(0, 31);
+}
 
 function statementSheet(project: Project, statement: StatementId): Sheet {
   const items = project.items.filter((i) => i.statement === statement);
-  const name = SHEET_NAME[statement](project.period);
+  const name = sheetName(statement);
   const columns = ["Line Item", project.docA.fileName, project.docB.fileName, "Difference", "Status", "Source"];
 
   const rows: Cell[][] = [

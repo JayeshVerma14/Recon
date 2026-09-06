@@ -22,7 +22,7 @@ import {
   Separator,
   Tag,
 } from "@/components/element";
-import { STATEMENTS, statementLabel } from "@/lib/mock";
+import { STATEMENTS, sectionSummary, statementLabel } from "@/lib/mock";
 import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import type { MatchingRule, StatementId } from "@/lib/types";
@@ -190,13 +190,7 @@ function ConfigureStep() {
                 checked={draft.statements.includes(statement.id)}
                 onCheckedChange={(on) => toggleStatement(statement.id, on)}
                 title={statement.label}
-                description={
-                  statement.id === "income"
-                    ? "19 accounts detected"
-                    : statement.id === "balance"
-                      ? "25 accounts detected"
-                      : "21 accounts detected"
-                }
+                description={sectionSummary(statement.id)}
               />
             ))}
           </div>

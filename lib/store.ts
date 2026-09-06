@@ -2,7 +2,7 @@
 
 import { create } from "zustand";
 
-import { CURRENT_USER, PROJECTS, REPORTS } from "@/lib/mock";
+import { CURRENT_USER, PROJECTS, REPORTS, STATEMENTS, statementLabel } from "@/lib/mock";
 import type {
   DocumentMeta,
   LineItem,
@@ -49,14 +49,17 @@ export interface Draft {
   tolerance: number;
 }
 
+/** What a new run covers unless the analyst says otherwise: the statements. */
+const DEFAULT_SECTIONS = STATEMENTS.filter((s) => s.group === "Statements").map((s) => s.id);
+
 const EMPTY_DRAFT: Draft = {
   name: "",
   entity: "",
   docA: null,
   docB: null,
-  statements: ["income", "balance"],
-  period: "FY2024",
-  comparisonPeriod: "FY2023",
+  statements: DEFAULT_SECTIONS,
+  period: "Q3 2025",
+  comparisonPeriod: "Q2 2025",
   matching: "rounding",
   tolerance: 1,
 };
@@ -133,7 +136,7 @@ export const useStore = create<State>((set, get) => ({
   projects: PROJECTS,
   reports: REPORTS,
   activeProjectId: PROJECTS[0].id,
-  statement: "income",
+  statement: STATEMENTS[0]?.id ?? "",
   filters: { status: "all", query: "", confidence: "all", unreviewedOnly: false },
   selection: [],
   activeItemId: null,
@@ -141,7 +144,12 @@ export const useStore = create<State>((set, get) => ({
   draft: EMPTY_DRAFT,
 
   setActiveProject: (id) =>
-    set({ activeProjectId: id, selection: [], activeItemId: null, statement: "income" }),
+    set((s) => ({
+      activeProjectId: id,
+      selection: [],
+      activeItemId: null,
+      statement: s.projects.find((p) => p.id === id)?.statements[0] ?? s.statement,
+    })),
   setStatement: (statement) => set({ statement, selection: [] }),
   setFilters: (patch) => set((s) => ({ filters: { ...s.filters, ...patch } })),
   resetFilters: () =>
@@ -319,7 +327,7 @@ export const useStore = create<State>((set, get) => ({
       updatedAt: stamp(),
       sections: project.statements.map((sid) => ({
         id: sid,
-        title: sid === "income" ? "Income Statement" : sid === "balance" ? "Balance Sheet" : "Cash Flow Statement",
+        title: statementLabel(sid),
         included: true,
         columns: ["Account", "Document A", "Document B", "Difference", "Status", "Confidence", "Reviewer"],
         hiddenAccounts: [],
@@ -330,7 +338,7 @@ export const useStore = create<State>((set, get) => ({
       projects: [project, ...s.projects],
       reports: [report, ...s.reports],
       activeProjectId: id,
-      statement: draft.statements[0] ?? "income",
+      statement: draft.statements[0] ?? STATEMENTS[0]?.id ?? "",
       selection: [],
       activeItemId: null,
     }));

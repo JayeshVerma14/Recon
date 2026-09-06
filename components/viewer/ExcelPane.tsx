@@ -10,16 +10,14 @@ import type { LineItem, Project } from "@/lib/types";
 
 const COLUMNS = ["A", "B", "C", "D", "E"];
 
-const SHEET_FOR_STATEMENT: Record<string, string> = {
-  income: "IS_Model",
-  balance: "BS_Model",
-  cashflow: "CF_Model",
-};
-
 /**
- * The workbook side of a PDF + Excel reconciliation. Cells the agent flagged
- * carry a numbered badge, and the formula bar shows what is actually in the
- * cell — which is usually the whole explanation.
+ * The agent's own working paper.
+ *
+ * Every finding was written on a row of a workbook — the line in column A,
+ * what the source said in column B, what the filing prints in column C — and
+ * this is that sheet. Flagged cells carry the comment's number, and the
+ * formula bar shows the agent's note for the cell, which is usually the whole
+ * explanation.
  */
 export function ExcelPane({
   project,
@@ -46,17 +44,17 @@ export function ExcelPane({
   onSelectIssue: (issueId: string) => void;
   onSelectItem: (itemId: string) => void;
 }) {
-  const onSheet = items.filter((i) => i.sourceB.sheet === sheet);
+  const onSheet = items.filter((i) => i.sourceA.sheet === sheet);
 
   const issueByCell = React.useMemo(() => {
     const map = new Map<string, Issue>();
-    issues.filter((i) => implicates(i, "excel")).forEach((issue) => {
-      /* a formula finding names its own cell; a value finding inherits the line's */
-      const cell =
-        issue.cell ?? items.find((item) => item.id === issue.itemId)?.sourceB.cell ?? undefined;
-      const onSheet =
-        issue.sheet ?? items.find((item) => item.id === issue.itemId)?.sourceB.sheet ?? undefined;
-      if (cell && onSheet === sheet) map.set(cell, issue);
+    issues.forEach((issue) => {
+      const item = items.find((i) => i.id === issue.itemId);
+      /* the finding sits on the source's cell — column B is what the source
+         said, and that is the figure a finding is raised about */
+      if (item?.sourceA.cell && item.sourceA.sheet === sheet) {
+        map.set(item.sourceA.cell, issue);
+      }
     });
     return map;
   }, [issues, sheet, items]);
@@ -64,27 +62,36 @@ export function ExcelPane({
   const rows = React.useMemo(() => {
     const map = new Map<number, LineItem>();
     onSheet.forEach((item) => {
-      const rowNumber = Number((item.sourceB.cell ?? "D0").replace(/[^0-9]/g, ""));
+      const rowNumber = Number((item.sourceA.cell ?? "B0").replace(/[^0-9]/g, ""));
       map.set(rowNumber, item);
     });
     const max = Math.max(32, ...Array.from(map.keys())) + 2;
     return Array.from({ length: max }, (_, i) => ({ row: i + 1, item: map.get(i + 1) }));
   }, [onSheet]);
 
-  const [selected, setSelected] = React.useState<string>("D11");
+  const [selected, setSelected] = React.useState<string>(() => onSheet[0]?.sourceA.cell ?? "B4");
 
   const selectedIssue = issueByCell.get(selected);
-  const selectedItem = onSheet.find((i) => i.sourceB.cell === selected);
-  const excelValue = (item: LineItem) => {
-    const issue = issues.find((i) => i.itemId === item.id);
-    return issue?.excelValue ?? effectiveValue(item);
-  };
+  const selectedItem = onSheet.find((i) => i.sourceA.cell === selected);
+  /* column B is the source's own reading, which is what this sheet records */
+  const excelValue = (item: LineItem) => item.valueA;
+
+  const openOnSheet = React.useMemo(
+    () =>
+      issues.filter(
+        (i) =>
+          dispositions[i.id] === undefined &&
+          items.some((item) => item.id === i.itemId && item.sourceA.sheet === sheet)
+      ).length,
+    [issues, dispositions, items, sheet]
+  );
 
   /* follow the focused finding into the sheet */
   React.useEffect(() => {
     const issue = issues.find((i) => i.id === focusId);
-    if (issue?.cell) setSelected(issue.cell);
-  }, [focusId, issues]);
+    const item = items.find((i) => i.id === issue?.itemId);
+    if (item?.sourceA.cell) setSelected(item.sourceA.cell);
+  }, [focusId, issues, items]);
 
   const cellRef = React.useRef<HTMLTableCellElement | null>(null);
   React.useEffect(() => {
@@ -151,9 +158,11 @@ export function ExcelPane({
                 </td>
                 {COLUMNS.map((col) => {
                   const ref = `${col}${row}`;
-                  const isLabel = col === "B" && item;
-                  const isValue = col === "D" && item;
-                  const isPrior = col === "E" && item;
+                  /* the export's own layout: the line, what the source said,
+                     what the filing prints */
+                  const isLabel = col === "A" && item;
+                  const isValue = col === "B" && item;
+                  const isPrior = col === "C" && item;
                   const issue = issueByCell.get(ref);
                   const isSelected = selected === ref;
                   const linked = Boolean(item && item.id === hoveredItemId);
@@ -187,7 +196,13 @@ export function ExcelPane({
                       )}
                       {isValue && (
                         <span className="inline-flex items-center gap-1 text-[#1B2733]">
-                          {formatValue(excelValue(item), item.unit)}
+                          {item.text ? (
+                            <span className="line-clamp-1 max-w-[150px] font-sans">
+                              {item.text.reference || "—"}
+                            </span>
+                          ) : (
+                            formatValue(excelValue(item), item.unit)
+                          )}
                           {issue && (
                             <span
                               title={issue.defect}
@@ -206,10 +221,13 @@ export function ExcelPane({
                         </span>
                       )}
                       {isPrior &&
-                        formatValue(
-                          Math.round(item.valueB * (item.unit === "ratio" ? 0.94 : 0.93)),
-                          item.unit
-                        )}
+                        (item.text ? (
+                          <span className="line-clamp-1 block max-w-[150px] font-sans">
+                            {item.text.working || "—"}
+                          </span>
+                        ) : (
+                          formatValue(effectiveValue(item), item.unit)
+                        ))}
                     </td>
                   );
                 })}
@@ -219,30 +237,20 @@ export function ExcelPane({
         </table>
       </div>
 
-      {/* sheet tabs */}
-      <div className="flex shrink-0 items-center gap-1 overflow-x-auto scrollbar-thin border-t border-[#D7DDE5] bg-[#F1F4F8] px-2 py-1">
-        {project.docB.sheets?.map((name) => {
-          const flagged = issues.filter(
-            (i) => implicates(i, "excel") && (i.sheet ?? SHEET_FOR_STATEMENT[i.statement]) === name
-          );
-          const openFlags = flagged.filter((i) => dispositions[i.id] === undefined).length;
-          return (
-            <span
-              key={name}
-              className={cn(
-                "inline-flex shrink-0 items-center gap-1 rounded-t px-2 py-0.5 text-[9px]",
-                name === sheet ? "bg-white font-medium text-[#1B2733]" : "text-[#7C8794]"
-              )}
-            >
-              {name}
-              {openFlags > 0 && (
-                <span className="inline-flex h-3 min-w-3 items-center justify-center rounded-full bg-critical px-0.5 text-[8px] font-semibold text-white">
-                  {openFlags}
-                </span>
-              )}
+      {/* the sheet this section was written on — one section, one sheet */}
+      <div className="flex shrink-0 items-center gap-2 border-t border-[#D7DDE5] bg-[#F1F4F8] px-2 py-1">
+        <span className="inline-flex shrink-0 items-center gap-1 rounded-t bg-white px-2 py-0.5 text-[9px] font-medium text-[#1B2733]">
+          {sheet}
+          {openOnSheet > 0 && (
+            <span className="inline-flex h-3 min-w-3 items-center justify-center rounded-full bg-critical px-0.5 text-[8px] font-semibold text-white">
+              {openOnSheet}
             </span>
-          );
-        })}
+          )}
+        </span>
+        <span className="truncate text-[9px] text-[#7C8794]">
+          {project.docB.label} read against {onSheet.length} line
+          {onSheet.length === 1 ? "" : "s"}
+        </span>
       </div>
     </div>
   );

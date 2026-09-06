@@ -27,6 +27,7 @@ import {
 import { DocumentPage, QueryMark, type Mark } from "@/components/viewer/DocumentPage";
 import { ExcelPane } from "@/components/viewer/ExcelPane";
 import { PAGE_WIDTH, PdfBarButton, PdfToolbar, usePdfView } from "@/components/viewer/PdfView";
+import { SectionSwitcher, type SectionLoad } from "@/components/viewer/SectionSwitcher";
 import { SourceSwitcher } from "@/components/viewer/SourceSwitcher";
 import { Button, Progress, Tooltip, useToast } from "@/components/element";
 import { isReviewed } from "@/lib/derive";
@@ -44,7 +45,7 @@ import {
   type IssueKind,
   type SourceReading,
 } from "@/lib/issues";
-import { statementLabel } from "@/lib/mock";
+import { STATEMENTS, statementLabel } from "@/lib/mock";
 import { useStore, type Disposition } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import type { Project, StatementId } from "@/lib/types";
@@ -59,7 +60,9 @@ type CommentFilter = "open" | "closed" | "all";
  */
 const SHAPE_ORDER: DisagreementShape[] = ["consensus", "unverified", "single", "split"];
 
-const PAGE_ORDER: StatementId[] = ["balance", "income", "cashflow"];
+/* the run's own section order — a real filing runs to dozens, and they are
+   read in the order the document prints them */
+const sectionsOf = (project: Project): StatementId[] => project.statements;
 const KIND_FILTERS: { value: IssueKind | "all"; label: string }[] = [
   { value: "all", label: "All" },
   { value: "gap", label: "Unverified" },
@@ -88,10 +91,7 @@ export function ReconcileViewer({
     [dispositions]
   );
 
-  const pages = React.useMemo(
-    () => PAGE_ORDER.filter((s) => project.statements.includes(s)),
-    [project.statements]
-  );
+  const pages = React.useMemo(() => sectionsOf(project), [project]);
   const allIssues = React.useMemo(() => buildIssues(project), [project]);
 
   const view = usePdfView({ pageCount: pages.length });
@@ -182,6 +182,31 @@ export function ReconcileViewer({
     ids: string[];
     marks: Record<string, Mark | undefined>;
   } | null>(null);
+
+  const sectionMetas = React.useMemo(
+    () =>
+      pages
+        .map((id) => STATEMENTS.find((s) => s.id === id))
+        .filter((s): s is (typeof STATEMENTS)[number] => Boolean(s)),
+    [pages]
+  );
+
+  /**
+   * What a section still owes. Counted apart, because a section whose only
+   * open findings are unverified lines is not a section with mistakes in it.
+   */
+  const sectionLoad = React.useCallback(
+    (sectionId: string): SectionLoad => {
+      const inSection = allIssues.filter((i) => i.statement === sectionId);
+      const stillOpen = inSection.filter(isOpen);
+      return {
+        errors: stillOpen.filter((i) => i.kind !== "gap").length,
+        gaps: stillOpen.filter((i) => i.kind === "gap").length,
+        lines: project.items.filter((i) => i.statement === sectionId).length,
+      };
+    },
+    [allIssues, isOpen, project.items]
+  );
 
   /** Open findings laid at one source's door. */
   const openAgainst = React.useCallback(
@@ -509,50 +534,15 @@ export function ReconcileViewer({
         can={[]}
         fileName={`${project.docB.fileName.replace(/\.[^.]+$/, "")}_reconciled.pdf`}
         leading={
-          <div className="flex items-center gap-0.5">
-            {pages.map((page, i) => {
-              const openOnPage = allIssues.filter(
-                (x) => x.statement === page && isOpen(x) && x.kind !== "gap"
-              ).length;
-              /* counted apart from the errors: a page whose only open findings
-                 are unverified lines is not a page with mistakes on it */
-              const gapsOnPage = allIssues.filter(
-                (x) => x.statement === page && isOpen(x) && x.kind === "gap"
-              ).length;
-              return (
-                <button
-                  key={page}
-                  type="button"
-                  onClick={() => setPageIndex(i)}
-                  className={cn(
-                    "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md px-2.5 text-body-sm transition-colors duration-fast",
-                    i === pageIndex
-                      ? "bg-[rgba(70,100,220,0.32)] font-medium text-white"
-                      : "text-white/70 hover:bg-white/10 hover:text-white"
-                  )}
-                >
-                  {statementLabel(page).replace(" Statement", "")}
-                  {openOnPage > 0 && (
-                    <span className="tabular flex h-4 min-w-4 items-center justify-center rounded-full bg-critical px-1 font-mono text-[10px] text-white">
-                      {openOnPage}
-                    </span>
-                  )}
-                  {gapsOnPage > 0 && (
-                    <span
-                      title={`${gapsOnPage} ${
-                        gapsOnPage === 1 ? "line" : "lines"
-                      } could not be verified`}
-                      className="tabular flex h-4 min-w-4 items-center justify-center rounded-full border border-dashed px-1 font-mono text-[10px]"
-                      style={{ borderColor: GAP_INK.edge, color: "#7FD3E8" }}
-                    >
-                      {gapsOnPage}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-            <span className="mx-1.5 h-5 w-px bg-white/15" />
-            <span className="tabular hidden font-mono text-helper text-white/55 xl:inline">
+          <div className="flex min-w-0 items-center gap-2">
+            <SectionSwitcher
+              sections={sectionMetas}
+              activeId={statement}
+              onSelect={(id) => setPageIndex(Math.max(0, pages.indexOf(id)))}
+              loadOf={sectionLoad}
+            />
+            <span className="mx-0.5 h-5 w-px shrink-0 bg-white/15" />
+            <span className="tabular hidden shrink-0 font-mono text-helper text-white/55 xl:inline">
               reconciled {reconciledPages}/{pages.length}
             </span>
           </div>
@@ -631,7 +621,7 @@ export function ReconcileViewer({
                   items={items}
                   notes={notes}
                   variant="reference"
-                  periods={[project.comparisonPeriod ?? "FY2023", "FY2022"]}
+                  periods={[referenceDoc.label, project.docB.label]}
                   marks={{}}
                   issueByItem={issueByItem}
                   textIssues={textIssues}
@@ -700,7 +690,7 @@ export function ReconcileViewer({
                 items={items}
                 notes={notes}
                 variant="working"
-                periods={[project.period, project.comparisonPeriod ?? "FY2023"]}
+                periods={[project.docB.label, referenceDoc.label]}
                 marks={marks}
                 issueByItem={issueByItem}
                 textIssues={textIssues}
