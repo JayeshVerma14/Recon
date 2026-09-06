@@ -101,6 +101,19 @@ export function ReconciliationReport({
     return seeded;
   }, [project.items, allIssues, dispositions]);
 
+  /* the ticks that only say "this agreed" — counted at the head of each page
+     rather than drawn on every line of a filing that mostly agrees */
+  const agreedTicks = React.useMemo(
+    () =>
+      new Set(
+        project.items
+          .filter((item) => !allIssues.some((i) => i.itemId === item.id))
+          .map((item) => item.id)
+      ),
+    [project.items, allIssues]
+  );
+  const [showAgreed, setShowAgreed] = React.useState(false);
+
   const openIssues = allIssues.filter((i) => dispositions[i.id] === undefined);
   const gaps = allIssues.filter((i) => i.kind === "gap");
   const verified = project.items.length - allIssues.filter((i) => i.itemId).length;
@@ -139,6 +152,9 @@ export function ReconciliationReport({
       variant="working"
       periods={[project.docB.label, referenceLabel(project, statement)]}
       marks={marks}
+      agentTicks={agreedTicks}
+      showAgreed={showAgreed}
+      onShowAgreed={() => setShowAgreed((v) => !v)}
       issueByItem={issueByItem}
       textIssues={allIssues.filter((i) => i.statement === statement && i.kind === "text")}
       issueNumber={issueNumber}

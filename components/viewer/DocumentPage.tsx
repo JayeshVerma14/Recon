@@ -27,6 +27,80 @@ import type { LineItem, Project, StatementId } from "@/lib/types";
 export type Mark = "tick" | "cross" | "unverified";
 
 /**
+ * What the page amounts to, said once.
+ *
+ * A reconciliation agrees far more often than it disagrees — across this run,
+ * 490 of 753 lines — and drawing a tick beside every one of them buries the
+ * findings under confirmations of things nobody needs to look at. On a dense
+ * schedule it is worse than clutter: the marks cover the document they are
+ * annotating, and a page of green reads as a page of work when it is a page of
+ * nothing to do.
+ *
+ * So agreement is counted here and drawn nowhere. The count is the control: a
+ * reviewer who wants to see every check made can ask for it, and the marks
+ * they placed themselves are never hidden either way.
+ */
+function PageTally({
+  items,
+  issueByItem,
+  showAgreed,
+  onShowAgreed,
+}: {
+  items: LineItem[];
+  issueByItem: Map<string, Issue>;
+  showAgreed: boolean;
+  onShowAgreed?: () => void;
+}) {
+  const findings = items.filter((i) => issueByItem.has(i.id));
+  const unverified = findings.filter((i) => issueByItem.get(i.id)?.kind === "gap").length;
+  const differ = findings.length - unverified;
+  const agreed = items.length - findings.length;
+
+  return (
+    <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-[#E4E9EF] pb-2 text-[9px] text-[#5A6672]">
+      <span className="font-medium text-[#1B2733]">{items.length} lines checked</span>
+
+      {agreed > 0 && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onShowAgreed?.();
+          }}
+          title={showAgreed ? "Hide the agreed ticks" : "Draw a tick on every line that agreed"}
+          className="inline-flex items-center gap-1 rounded px-1 py-0.5 transition-colors hover:bg-[#EDF1F6]"
+        >
+          <Check className="h-2.5 w-2.5 text-[#179864]" strokeWidth={3} />
+          <span className="tabular font-mono">{agreed}</span>
+          agree
+          <span className="text-[#9AA5B1]">{showAgreed ? "· hide" : "· show"}</span>
+        </button>
+      )}
+
+      {differ > 0 && (
+        <span className="inline-flex items-center gap-1">
+          <span className="h-1.5 w-1.5 rounded-full bg-critical" />
+          <span className="tabular font-mono">{differ}</span>
+          differ
+        </span>
+      )}
+
+      {unverified > 0 && (
+        <span className="inline-flex items-center gap-1" style={{ color: GAP_INK.strong }}>
+          <QueryMark />
+          <span className="tabular font-mono">{unverified}</span>
+          could not be verified
+        </span>
+      )}
+
+      {findings.length === 0 && (
+        <span className="text-[#0F7048]">Nothing to review on this page.</span>
+      )}
+    </div>
+  );
+}
+
+/**
  * A passage, held to two lines. A filing's prose runs to paragraphs and the
  * page is a table — the comment card carries the full wording and the diff, so
  * the line only has to say enough to be recognised.
@@ -48,6 +122,9 @@ export function DocumentPage({
   variant,
   periods,
   marks,
+  agentTicks,
+  showAgreed = true,
+  onShowAgreed,
   issueByItem,
   textIssues,
   issueNumber,
@@ -71,6 +148,13 @@ export function DocumentPage({
   variant: "reference" | "working";
   periods: [string, string];
   marks: Record<string, Mark>;
+  /**
+   * Lines the agent ticked itself. Held apart from the reviewer's own marks so
+   * agreement can be reported once instead of drawn on every line.
+   */
+  agentTicks?: Set<string>;
+  showAgreed?: boolean;
+  onShowAgreed?: () => void;
   issueByItem: Map<string, Issue>;
   textIssues: Issue[];
   issueNumber: Map<string, number>;
@@ -123,6 +207,15 @@ export function DocumentPage({
         )}
       </div>
 
+      {agentTicks && (
+        <PageTally
+          items={items}
+          issueByItem={issueByItem}
+          showAgreed={showAgreed}
+          onShowAgreed={onShowAgreed}
+        />
+      )}
+
       <table className="w-full border-collapse">
         <thead>
           <tr className="border-b border-[#C9D3DD]">
@@ -142,7 +235,11 @@ export function DocumentPage({
         </thead>
         <tbody>
           {items.map((item) => {
-            const mark = marks[item.id];
+            const rawMark = marks[item.id];
+            /* a tick the agent placed is agreement, and agreement is counted at
+               the top of the page rather than drawn on every line it applies to */
+            const mark =
+              rawMark === "tick" && !showAgreed && agentTicks?.has(item.id) ? undefined : rawMark;
             const issue = issueByItem.get(item.id);
             /* the filing is only marked where the filing itself is implicated */
             const shows = issue !== undefined && (variant === "working" || implicates(issue, "pdf"));

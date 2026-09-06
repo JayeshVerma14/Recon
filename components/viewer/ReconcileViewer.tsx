@@ -4,6 +4,7 @@ import * as React from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   Check,
+  CheckCheck,
   CircleDashed,
   Columns3,
   Download,
@@ -106,6 +107,14 @@ export function ReconcileViewer({
   const [reference, setReference] = React.useState<string>("A");
   const [gutter, setGutter] = React.useState(false);
   const [marks, setMarks] = React.useState<Record<string, Mark>>({});
+  /**
+   * Ticks the agent placed, kept apart from the reviewer's own. Agreement is
+   * reported once at the head of the page rather than drawn on every line, so
+   * the page has to know which ticks are confirmations and which are decisions
+   * somebody made.
+   */
+  const [agentTicks, setAgentTicks] = React.useState<Set<string>>(new Set());
+  const [showAgreed, setShowAgreed] = React.useState(false);
   const [hoveredItemId, setHoveredItemId] = React.useState<string | null>(null);
   const [focusIssueId, setFocusIssueId] = React.useState<string | null>(null);
   const [focusLineId, setFocusLineId] = React.useState<string | null>(focusItemId);
@@ -227,10 +236,15 @@ export function ReconcileViewer({
   React.useEffect(() => {
     if (!open) return;
     const seeded: Record<string, Mark> = {};
+    const confirmed = new Set<string>();
     project.items.forEach((item) => {
-      if (item.status === "matched" || item.status === "approved") seeded[item.id] = "tick";
+      if (item.status === "matched" || item.status === "approved") {
+        seeded[item.id] = "tick";
+        confirmed.add(item.id);
+      }
       if (item.status === "rejected") seeded[item.id] = "cross";
     });
+    setAgentTicks(confirmed);
     allIssues.forEach((issue) => {
       if (issue.kind === "gap" && issue.itemId) seeded[issue.itemId] = "unverified";
     });
@@ -340,6 +354,13 @@ export function ReconcileViewer({
   const referenceDoc = documents.find((d) => d.id === reference) ?? project.docA;
 
   const toggleMark = (id: string) => {
+    /* once a person has touched the line the mark is theirs, and always shows */
+    setAgentTicks((current) => {
+      if (!current.has(id)) return current;
+      const next = new Set(current);
+      next.delete(id);
+      return next;
+    });
     setFocusLineId(id);
     const issue = issueByItem.get(id);
     if (issue) setFocusIssueId(issue.id);
@@ -556,6 +577,13 @@ export function ReconcileViewer({
           {sync ? <Link2 /> : <Link2Off />}
         </PdfBarButton>
         <PdfBarButton
+          label={showAgreed ? "Hide the agreed ticks" : "Show every check the agent made"}
+          active={showAgreed}
+          onClick={() => setShowAgreed((v) => !v)}
+        >
+          <CheckCheck />
+        </PdfBarButton>
+        <PdfBarButton
           label="Agreement grid"
           active={gutter}
           onClick={() => setGutter((v) => !v)}
@@ -692,6 +720,9 @@ export function ReconcileViewer({
                 variant="working"
                 periods={[project.docB.label, referenceDoc.label]}
                 marks={marks}
+                agentTicks={agentTicks}
+                showAgreed={showAgreed}
+                onShowAgreed={() => setShowAgreed((v) => !v)}
                 issueByItem={issueByItem}
                 textIssues={textIssues}
                 issueNumber={issueNumber}
