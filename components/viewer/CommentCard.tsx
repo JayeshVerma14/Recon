@@ -21,7 +21,16 @@ import { QueryMark } from "@/components/viewer/DocumentPage";
 import { Button, Tooltip } from "@/components/element";
 import { formatDifference, formatValue } from "@/lib/derive";
 import { statementLabel } from "@/lib/mock";
-import { GAP_INK, GAP_META, SHAPE_META, SIDE_META, wordDiff, type Issue } from "@/lib/issues";
+import {
+  GAP_INK,
+  GAP_META,
+  SHAPE_META,
+  SIDE_META,
+  documentsOf,
+  wordDiff,
+  type Issue,
+} from "@/lib/issues";
+import { readReason } from "@/lib/reason";
 import type { Disposition } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import type { LineItem, Project } from "@/lib/types";
@@ -236,7 +245,7 @@ export function CommentCard({
         </div>
       )}
 
-      <p className="px-2.5 py-2 text-helper text-muted-foreground">{issue.explanation}</p>
+      <Explanation issue={issue} project={project} />
 
       {/* ------------------------------ disposition ----------------------------- */}
       {closed ? (
@@ -361,6 +370,70 @@ function Badge({
         : number}
     </span>
   );
+}
+
+/**
+ * What the agent found, in the agent's own words but not its own grammar.
+ *
+ * The note is kept whole — nothing is summarised away — but the clauses the
+ * card states better elsewhere are dropped, documents are named the way the
+ * rest of the interface names them, and the explanation leads. A long note
+ * stays collapsed until asked for, because the first sentence is nearly always
+ * the one that decides what to do.
+ */
+function Explanation({
+  issue,
+  project,
+  plain = false,
+}: {
+  issue: Issue;
+  project: Project;
+  plain?: boolean;
+}) {
+  const [expanded, setExpanded] = React.useState(false);
+  const documents = React.useMemo(() => documentsOf(project), [project]);
+  const read = React.useMemo(
+    () => readReason(issue.explanation, documents, issue.kind),
+    [issue.explanation, issue.kind, documents]
+  );
+
+  if (!read.lead && !read.buildout && !read.detail.length) return null;
+
+  const body = (
+    <>
+      {read.lead && <span className="block">{read.lead}</span>}
+
+      {read.buildout && (
+        <span className="mt-1 flex items-start gap-1.5">
+          <Sigma className="mt-[3px] h-2.5 w-2.5 shrink-0 text-muted-foreground" />
+          <span>{read.buildout}</span>
+        </span>
+      )}
+
+      {read.detail.length > 0 &&
+        (expanded ? (
+          <span className="mt-1 flex flex-col gap-1">
+            {read.detail.map((line, i) => (
+              <span key={i}>{line}</span>
+            ))}
+          </span>
+        ) : (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setExpanded(true);
+            }}
+            className="mt-1 block text-brand transition-colors duration-fast hover:underline"
+          >
+            {read.detail.length} more {read.detail.length === 1 ? "note" : "notes"}
+          </button>
+        ))}
+    </>
+  );
+
+  if (plain) return body;
+  return <div className="px-2.5 py-2 text-helper text-muted-foreground">{body}</div>;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -800,7 +873,7 @@ function PrintedComment({
       </p>
 
       <p className="mt-1.5 pl-[26px] text-helper leading-[18px] text-foreground/90">
-        {issue.explanation}
+        <Explanation issue={issue} project={project} plain />
       </p>
 
       {issue.kind === "formula" && (
