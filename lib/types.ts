@@ -1,4 +1,12 @@
-export type StatementId = "income" | "balance" | "cashflow";
+/**
+ * A section of the filing under review — a statement, a note, a narrative
+ * block, or one of the footing and tie-out checks.
+ *
+ * This was a three-value union while the app carried one made-up statement per
+ * kind. A real reconciliation runs to dozens of sections, so the id is now
+ * whatever the workbook called the sheet, and SECTIONS is the registry.
+ */
+export type StatementId = string;
 
 export type ReviewStatus =
   | "matched"
@@ -63,6 +71,12 @@ export interface LineItem {
   isSubtotal: boolean;
   valueA: number;
   valueB: number;
+  /**
+   * Wording, on the lines that carry words rather than a figure. Most of a
+   * filing is prose — a note, a policy, a caption — and those lines reconcile
+   * the same way, so they are line items too rather than a separate kind.
+   */
+  text?: { working: string; reference: string };
   /** Analyst override of the reconciled value. */
   editedValue?: number;
   unit: "currency" | "ratio";
@@ -83,6 +97,14 @@ export interface StatementMeta {
   id: StatementId;
   label: string;
   shortLabel: string;
+  /** How the reviewer's navigation clusters it — "Statements", "Notes", … */
+  group: string;
+  /** Page the section starts on in the filing. */
+  page: number;
+  /** The supporting document this section was read against. */
+  referenceDoc: string;
+  /** Reporting date the section reconciles, where it has one. */
+  period: string;
 }
 
 export interface Project {

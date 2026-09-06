@@ -6,7 +6,7 @@ import { Check, ChevronRight, Loader2 } from "lucide-react";
 
 import { Button, Card, Progress, Tag } from "@/components/element";
 import { cn } from "@/lib/utils";
-import { statementLabel } from "@/lib/mock";
+import { sectionSummary, statementLabel, statementMeta } from "@/lib/mock";
 import type { Draft } from "@/lib/store";
 import type { StatementId } from "@/lib/types";
 
@@ -78,9 +78,7 @@ function buildStages(draft: Draft): Stage[] {
           ms: 1200,
           detail: statements.map(
             (s) =>
-              `${statementLabel(s)} located · ${
-                s === "income" ? "pages 42–43" : s === "balance" ? "pages 46–47" : "pages 49–50"
-              }`
+              `${statementLabel(s)} located · page ${statementMeta(s)?.page ?? 1}`
           ),
         },
         {
@@ -127,11 +125,7 @@ function buildStages(draft: Draft): Stage[] {
         label: `Reconciling ${statementLabel(s)}`,
         ms: 1400,
         detail: [
-          s === "income"
-            ? "19 accounts compared · 4 differences"
-            : s === "balance"
-              ? "25 accounts compared · 7 differences"
-              : "21 accounts compared · 5 differences",
+          sectionSummary(s),
           `Rule: ${
             draft.matching === "exact"
               ? "exact match"

@@ -1,5 +1,6 @@
 import { difference } from "@/lib/derive";
-import type { DocumentMeta, LineItem, Project, StatementId } from "@/lib/types";
+import { FIXTURE, FIXTURE_ROWS, rowById, type FixtureRow } from "@/lib/fixture";
+import type { DocumentMeta, Project, StatementId } from "@/lib/types";
 
 /**
  * Three things can disagree between two filings: a number, a word, or the
@@ -184,519 +185,47 @@ export interface DocNote {
 
 /* ------------------------------ narrative notes ----------------------------- */
 
-export const NOTES: DocNote[] = [
-  {
-    id: "note-inc-1",
-    statement: "income",
-    heading: "Note 2 — Revenue recognition",
-    body:
-      "Revenue from product sales is recognised at a point in time, when control of the goods transfers to the customer. Service revenue is recognised rateably over the contract term.",
-    referenceBody:
-      "Revenue from product sales is recognised over time, as the performance obligation is satisfied. Service revenue is recognised rateably over the contract term.",
-  },
-  {
-    id: "note-inc-2",
-    statement: "income",
-    heading: "Note 3 — Income taxes",
-    body:
-      "The effective tax rate for the year was 25.2 per cent, compared with a statutory rate of 25.0 per cent. The difference arises from non-deductible expenses.",
-    referenceBody:
-      "The effective tax rate for the year was 24.6 per cent, compared with a statutory rate of 25.0 per cent. The difference arises from non-deductible expenses and research credits.",
-  },
-  {
-    id: "note-inc-3",
-    statement: "income",
-    heading: "Note 4 — Subsequent events",
-    body:
-      "On 22 January 2025 the Group refinanced its revolving credit facility, extending the maturity to 2029.",
-    referenceBody:
-      "On 15 January 2025 the Group refinanced its revolving credit facility, extending the maturity to 2029.",
-  },
-  {
-    id: "note-bal-1",
-    statement: "balance",
-    heading: "Note 8 — Trade receivables",
-    body:
-      "Trade receivables are stated gross of the allowance for expected credit losses, which was 150 at the reporting date.",
-    referenceBody:
-      "Trade receivables are stated net of the allowance for expected credit losses, which was 150 at the reporting date.",
-  },
-  {
-    id: "note-bal-2",
-    statement: "balance",
-    heading: "Note 9 — Going concern",
-    body: "",
-    referenceBody:
-      "The directors have assessed the Group's ability to continue as a going concern for at least twelve months from the date of approval and consider that basis appropriate.",
-    referenceOnly: true,
-  },
-  {
-    id: "note-cf-1",
-    statement: "cashflow",
-    heading: "Note 12 — Cash and cash equivalents",
-    body:
-      "Cash at the end of the period excludes restricted cash of 227, which is presented within other assets.",
-    referenceBody:
-      "Cash at the end of the period includes restricted cash of 227, consistent with the balance sheet.",
-  },
-];
+/**
+ * The passages the filing carries, alongside the wording the source it was read
+ * against used. A note is any line with words where a figure would otherwise
+ * be — which in a 10-Q is most of the document.
+ */
+export const NOTES: DocNote[] = FIXTURE_ROWS.filter(
+  ({ row }) => row.working === null && (row.workingText || referenceTextOf(row))
+).map(({ section, row }) => {
+  const referenceBody = referenceTextOf(row);
+  return {
+    id: `note-${row.id}`,
+    statement: section.id,
+    heading: row.account,
+    body: row.workingText,
+    referenceBody: referenceBody || undefined,
+    referenceOnly: !row.workingText && Boolean(referenceBody),
+  };
+});
 
-/** The exact span each text finding highlights, per side. */
-const TEXT_ISSUES: {
-  id: string;
-  side: Disagreement;
-  noteId: string;
-  statement: StatementId;
-  title: string;
-  working: string;
-  reference: string;
-  explanation: string;
-  confidence: number;
-  missingIn?: "working";
-}[] = [
-  {
-    id: "txt-inc-1",
-    side: "both",
-    noteId: "note-inc-1",
-    statement: "income",
-    title: "Revenue recognition wording differs",
-    working: "recognised at a point in time, when control of the goods transfers to the customer",
-    reference: "recognised over time, as the performance obligation is satisfied",
-    explanation:
-      "The two filings describe different revenue recognition patterns for the same product line. This is a policy statement, not a rounding difference — confirm which wording the audited accounts use.",
-    confidence: 88,
-  },
-  {
-    id: "txt-inc-2",
-    side: "both",
-    noteId: "note-inc-2",
-    statement: "income",
-    title: "Effective tax rate stated differently",
-    working: "25.2 per cent",
-    reference: "24.6 per cent",
-    explanation:
-      "The narrative rate matches the tax expense on each side, so the note is internally consistent in both documents. The underlying tax figure is the item to resolve.",
-    confidence: 84,
-  },
-  {
-    id: "txt-inc-3",
-    side: "both",
-    noteId: "note-inc-3",
-    statement: "income",
-    title: "Subsequent event dated differently",
-    working: "22 January 2025",
-    reference: "15 January 2025",
-    explanation:
-      "Refinancing date differs by one week between the two filings. Check the facility agreement for the executed date.",
-    confidence: 91,
-  },
-  {
-    id: "txt-bal-1",
-    side: "both",
-    noteId: "note-bal-1",
-    statement: "balance",
-    title: "Receivables stated gross, not net",
-    working: "stated gross of the allowance",
-    reference: "stated net of the allowance",
-    explanation:
-      "This wording explains the 150 difference on Accounts receivable, net. One document presents the allowance separately, the other nets it off.",
-    confidence: 93,
-  },
-  {
-    id: "txt-bal-2",
-    side: "pdf",
-    noteId: "note-bal-2",
-    statement: "balance",
-    title: "Going concern statement missing",
-    working: "",
-    reference:
-      "The directors have assessed the Group's ability to continue as a going concern for at least twelve months from the date of approval",
-    explanation:
-      "Not found on the working document. The reference filing carries a going concern assessment that has no counterpart here.",
-    confidence: 96,
-    missingIn: "working",
-  },
-  {
-    id: "txt-cf-1",
-    side: "both",
-    noteId: "note-cf-1",
-    statement: "cashflow",
-    title: "Restricted cash treated differently",
-    working: "excludes restricted cash of 227",
-    reference: "includes restricted cash of 227",
-    explanation:
-      "Explains why closing cash does not tie to the balance sheet on the working document.",
-    confidence: 89,
-  },
-];
+function referenceTextOf(row: FixtureRow) {
+  return row.readings.find((r) => r.text)?.text ?? "";
+}
 
-/* ------------------------------ workbook cells ------------------------------ */
-
-const FORMULA_ISSUES: {
-  id: string;
-  itemId: string;
-  statement: StatementId;
-  side: Disagreement;
-  sheet: string;
-  cell: string;
-  formula: string;
-  expectedFormula: string;
-  defect: string;
-  explanation: string;
-  confidence: number;
-}[] = [
-  {
-    id: "fx-inc-1",
-    side: "both",
-    itemId: "income-04",
-    statement: "income",
-    sheet: "IS_Model",
-    cell: "D11",
-    formula: "=D9-D10+450",
-    expectedFormula: "=D9-D10",
-    defect: "Adjustment typed into the formula",
-    explanation:
-      "Inbound freight of 450 is added inside the cost of sales formula rather than reclassified. The same 450 sits in general & administrative on the reference filing.",
-    confidence: 91,
-  },
-  {
-    id: "fx-inc-2",
-    side: "excel",
-    itemId: "income-09",
-    statement: "income",
-    sheet: "IS_Model",
-    cell: "D17",
-    formula: "=SUM(D14:D15)",
-    expectedFormula: "=SUM(D14:D16)",
-    defect: "Range excludes a row",
-    explanation:
-      "The operating expense total stops at row 15, leaving research & development on row 16 outside the sum.",
-    confidence: 87,
-  },
-  {
-    id: "fx-inc-3",
-    side: "excel",
-    itemId: "income-16",
-    statement: "income",
-    sheet: "IS_Model",
-    cell: "D26",
-    formula: "='[FY2023_Model.xlsx]IS'!D26*1.02",
-    expectedFormula: "=D25*Assumptions!$C$8",
-    defect: "Stale external link",
-    explanation:
-      "Tax expense is grown from last year's workbook instead of applying this year's effective rate from the assumptions tab.",
-    confidence: 76,
-  },
-  {
-    id: "fx-bal-1",
-    side: "excel",
-    itemId: "balance-03",
-    statement: "balance",
-    sheet: "BS_Model",
-    cell: "D8",
-    formula: "22900",
-    expectedFormula: "=D7-Allowance!D12",
-    defect: "Hardcoded over a formula",
-    explanation:
-      "A typed value has replaced the formula that nets the expected credit loss allowance, so the allowance of 150 is no longer deducted.",
-    confidence: 79,
-  },
-  {
-    id: "fx-bal-2",
-    side: "both",
-    itemId: "balance-09",
-    statement: "balance",
-    sheet: "BS_Model",
-    cell: "D15",
-    formula: "=9400-280",
-    expectedFormula: "=D14-Amort!D19",
-    defect: "Inline adjustment",
-    explanation:
-      "A full year of amortisation on the Q4 acquisition is subtracted inline; the reference filing charges one quarter.",
-    confidence: 72,
-  },
-  {
-    id: "fx-cf-1",
-    side: "excel",
-    itemId: "cashflow-21",
-    statement: "cashflow",
-    sheet: "CF_Model",
-    cell: "D30",
-    formula: "=D28+D29",
-    expectedFormula: "=D28+D29 → ties to BS_Model!D6",
-    defect: "Does not tie to the balance sheet",
-    explanation:
-      "Closing cash of 18,100 does not agree to cash on the balance sheet of 18,400. The 300 gap is the operating cash difference above.",
-    confidence: 90,
-  },
-];
-
-
-/* --------------------- one source wrong, the other right -------------------- */
+/* --------------------------------- sources --------------------------------- */
 
 /**
- * Where only one source is out, the reconciled figure follows the source that
- * agrees with the rest of the statement — and the finding names the outlier so
- * the correction is raised against the right document.
+ * Everything the filing was read against beyond the primary pair. A footing
+ * check reads the filing against itself, so the filing is its own source
+ * there — which is why the working document can appear in a reading.
  */
-const SINGLE_SOURCE_ISSUES: {
-  id: string;
-  itemId: string;
-  statement: StatementId;
-  side: Disagreement;
-  working: number;
-  pdf: number;
-  excel: number;
-  explanation: string;
-  confidence: number;
-}[] = [
-  {
-    id: "src-inc-1",
-    itemId: "income-11",
-    statement: "income",
-    side: "pdf",
-    working: 4100,
-    pdf: 4180,
-    excel: 4100,
-    explanation:
-      "The filing prints 4,180 while the workbook and the reconciled statement both carry 4,100. The figure in the filing predates the final depreciation run — raise it against the filing, not the model.",
-    confidence: 88,
-  },
-  {
-    id: "src-inc-2",
-    itemId: "income-06",
-    statement: "income",
-    side: "excel",
-    working: 9800,
-    pdf: 9800,
-    excel: 9860,
-    explanation:
-      "The workbook is 60 higher than both the filing and the reconciled statement. A media accrual is picked up twice on the marketing tab.",
-    confidence: 82,
-  },
-  {
-    id: "src-bal-1",
-    itemId: "balance-01",
-    statement: "balance",
-    side: "pdf",
-    working: 18400,
-    pdf: 18040,
-    excel: 18400,
-    explanation:
-      "18,040 in the filing against 18,400 everywhere else — a transposed digit. The bank confirmation supports 18,400.",
-    confidence: 94,
-  },
-  {
-    id: "src-bal-2",
-    itemId: "balance-14",
-    statement: "balance",
-    side: "excel",
-    working: 8650,
-    pdf: 8650,
-    excel: 8560,
-    explanation:
-      "The workbook shows 8,560 where the filing and the reconciled statement agree on 8,650. Digits transposed in the accruals schedule.",
-    confidence: 86,
-  },
-  {
-    /* nobody disagrees with anybody — the reconciled figure is the one that is out */
-    id: "src-cf-0",
-    itemId: "cashflow-02",
-    statement: "cashflow",
-    side: "both",
-    working: 4010,
-    pdf: 4100,
-    excel: 4100,
-    explanation:
-      "All five sources report 4,100 and the reconciled statement carries 4,010. Nothing disagrees except the extraction — re-read this line before signing the page off.",
-    confidence: 68,
-  },
-  {
-    id: "src-cf-1",
-    itemId: "cashflow-03",
-    statement: "cashflow",
-    side: "excel",
-    working: 3850,
-    pdf: 3850,
-    excel: 3580,
-    explanation:
-      "Share-based payment expense is 3,580 in the workbook against 3,850 in the filing and the reconciled statement. The workbook omits the Q4 grant tranche.",
-    confidence: 90,
-  },
-];
-
-
-/* ------------------------------ nothing to check ---------------------------- */
-
-/**
- * Lines the agent could not check at all. These are the dangerous ones,
- * because a reconciliation that only reports disagreements reads as complete
- * when it is merely quiet: an unverified line looks exactly like an agreed one
- * unless the interface says otherwise. Each carries the reason, and a per-source
- * account of the search, so a reviewer can see that five documents were opened
- * and none of them settled it.
- */
-const GAP_ISSUES: {
-  id: string;
-  itemId: string;
-  statement: StatementId;
-  reason: GapReason;
-  explanation: string;
-  /** What happened in each source, by document id. */
-  searched: Record<string, string>;
-}[] = [
-  {
-    id: "gap-inc-1",
-    itemId: "income-14",
-    statement: "income",
-    reason: "absent",
-    explanation:
-      "The reconciled statement reports nil and no source carries the line at all — which is not the same thing as five sources agreeing on zero. Until something supports it, the nil is the agent's assumption rather than a reading.",
-    searched: {
-      A: "Line not printed on the statement",
-      B: "No row on IS_Model",
-      C: "Line not printed",
-      D: "No account mapped to it",
-      E: "Not broken out in the pack",
-    },
-  },
-  {
-    id: "gap-inc-2",
-    itemId: "income-18",
-    statement: "income",
-    reason: "unreadable",
-    explanation:
-      "Per-share figures sit in a footnote table that came through as one merged block on every scanned source. The number is on the page; it could not be read off it.",
-    searched: {
-      A: "Footnote table merged in the scan (p.43)",
-      B: "Cell holds a text label, not a number",
-      C: "Footnote table merged in the scan",
-      D: "Not a trial-balance line",
-      E: "Rounded per-share range only",
-    },
-  },
-  {
-    id: "gap-bal-1",
-    itemId: "balance-20",
-    statement: "balance",
-    reason: "unmapped",
-    explanation:
-      "The trial balance holds 2,150 inside a combined Other liabilities bucket that also feeds two current lines. Nothing on the mapping tab splits it, so no reading can be attributed to this line without guessing.",
-    searched: {
-      A: "Aggregated with provisions",
-      B: "Formula points at a deleted range",
-      C: "Prior-period mapping only",
-      D: "Combined bucket — no split on Mapping",
-      E: "Not broken out in the pack",
-    },
-  },
-  {
-    id: "gap-bal-2",
-    itemId: "balance-22",
-    statement: "balance",
-    reason: "out_of_range",
-    explanation:
-      "Equity is presented on a page that was never part of the upload — the filing jumps from page 47 to page 49. Nothing was searched here, so nothing was found.",
-    searched: {
-      A: "Page 48 missing from the upload",
-      B: "Cover sheet only — no equity tab",
-      C: "Page range not uploaded",
-      D: "Equity accounts outside the extract",
-      E: "Not in the pack",
-    },
-  },
-  {
-    id: "gap-cf-1",
-    itemId: "cashflow-04",
-    statement: "cashflow",
-    reason: "stale",
-    explanation:
-      "The one source carrying this line is the prior-year 10-K. An FY2023 figure cannot verify an FY2024 one, so the reconciled (420) stands on nothing from this period.",
-    searched: {
-      A: "Not separately disclosed",
-      B: "Row present, no value",
-      C: "FY2023 figure only",
-      D: "No deferred-tax movement account",
-      E: "Not in the pack",
-    },
-  },
-  {
-    id: "gap-cf-2",
-    itemId: "cashflow-12",
-    statement: "cashflow",
-    reason: "absent",
-    explanation:
-      "Investing detail is presented net of maturities in every source. No source reports the gross purchases figure the reconciled statement carries.",
-    searched: {
-      A: "Presented net of maturities",
-      B: "Row present, no value",
-      C: "Presented net of maturities",
-      D: "No account mapped to it",
-      E: "Presented net of maturities",
-    },
-  },
-];
-
-
-/* ------------------------------- more sources ------------------------------ */
-
-/**
- * A reconciliation is rarely two documents. These sit alongside the primary
- * pair and are read the same way — the point of the model is that no source is
- * privileged except the reconciled output itself.
- */
-export const EXTRA_SOURCES: DocumentMeta[] = [
-  {
-    id: "C",
-    fileName: "10-K_2023.pdf",
-    kind: "pdf",
-    sizeMb: 15.9,
-    pages: 186,
-    label: "Prior-year 10-K",
-  },
-  {
-    id: "D",
-    fileName: "Trial_Balance_Q4.xlsx",
-    kind: "xlsx",
-    sizeMb: 2.1,
-    sheets: ["TB_Q4", "Mapping", "Adjustments"],
-    label: "Trial balance",
-  },
-  {
-    id: "E",
-    fileName: "Board_Pack_Dec.pdf",
-    kind: "pdf",
-    sizeMb: 9.4,
-    pages: 64,
-    label: "Board pack",
-  },
-];
-
-/**
- * Where a further source departs from the reconciled figure. Anything not
- * listed here reads the same as the reconciled statement — which is the normal
- * case, and the reason the card collapses agreement rather than listing it.
- */
-const EXTRA_READINGS: { docId: string; itemId: string; value: number }[] = [
-  /* the trial balance is systematically out on opex — a mapping error */
-  { docId: "D", itemId: "income-06", value: 9860 },
-  { docId: "D", itemId: "income-07", value: 6280 },
-  { docId: "D", itemId: "income-09", value: 21940 },
-  /* the prior-year filing carries the pre-restatement tax charge */
-  { docId: "C", itemId: "income-16", value: 6250 },
-  /* the board pack rounds to the nearest hundred */
-  { docId: "E", itemId: "income-03", value: 125000 },
-  { docId: "E", itemId: "balance-01", value: 18400 },
-  /* three-way split on receivables: every source has its own number */
-  { docId: "C", itemId: "balance-03", value: 22750 },
-  { docId: "D", itemId: "balance-03", value: 22820 },
-  /* the whole set agrees, and the reconciled figure is the odd one out */
-  { docId: "C", itemId: "cashflow-02", value: 4100 },
-  { docId: "D", itemId: "cashflow-02", value: 4100 },
-  { docId: "E", itemId: "cashflow-02", value: 4100 },
-  /* board pack is stale on closing cash */
-  { docId: "E", itemId: "cashflow-21", value: 18400 },
-];
+export const EXTRA_SOURCES: DocumentMeta[] = FIXTURE.documents
+  .filter((doc) => doc.id !== "A" && doc.id !== FIXTURE.workingDoc)
+  .map((doc) => ({
+    id: doc.id,
+    fileName: doc.fileName,
+    kind: doc.kind,
+    sizeMb: doc.sizeMb,
+    pages: doc.pages,
+    sheets: doc.sheets,
+    label: doc.label,
+  }));
 
 /** Every source in the reconciliation, primary pair first. */
 export function documentsOf(project: Project): DocumentMeta[] {
@@ -705,230 +234,185 @@ export function documentsOf(project: Project): DocumentMeta[] {
 
 /* --------------------------------- builder --------------------------------- */
 
+/** Why the line could not be checked, read off the agent's own wording. */
+function gapReasonFrom(reason: string): GapReason {
+  const text = reason.toLowerCase();
+  if (/map|bucket|account code/.test(text)) return "unmapped";
+  if (/unreadable|could not be read|illegible/.test(text)) return "unreadable";
+  if (/prior period|out-of-period|another period|prior filing only/.test(text)) return "stale";
+  if (/page|not uploaded|outside the/.test(text)) return "out_of_range";
+  return "absent";
+}
+
 /**
- * Reads every source against the reconciled figure and classifies the result.
- * A source that carries the same number simply "agrees" — that is the common
- * case, and the card collapses it rather than listing it.
+ * What each source had to say about one line.
+ *
+ * A source that was never read against this line is not the same as one that
+ * was read and found nothing, so the two are kept apart: the first is simply
+ * uncovered, the second carries the agent's note about what the search turned
+ * up. Both render as "no figure", and only the second is evidence.
  */
-function readSources(
-  project: Project,
-  item: LineItem,
-  working: number,
-  primary: { pdf: number; excel: number }
-): { readings: SourceReading[]; disagreeing: string[]; shape: DisagreementShape } {
-  const docs = documentsOf(project);
+function readSources(project: Project, row: FixtureRow, tolerance: number) {
+  const working = row.working ?? 0;
 
-  const readings: SourceReading[] = docs.map((doc) => {
-    const override = EXTRA_READINGS.find((r) => r.docId === doc.id && r.itemId === item.id);
-    const value =
-      doc.id === "A"
-        ? primary.pdf
-        : doc.id === "B"
-          ? primary.excel
-          : (override?.value ?? working);
-
-    const delta = Number((value - working).toFixed(2));
+  const readings: SourceReading[] = documentsOf(project).map((doc) => {
+    const reading = row.readings.find((r) => r.docId === doc.id);
+    const value = reading?.value ?? undefined;
+    const delta = value === undefined ? 0 : Number((value - working).toFixed(2));
     return {
       docId: doc.id,
       label: doc.label,
       kind: doc.kind,
       value,
-      covered: true,
-      agrees: delta === 0,
+      covered: value !== undefined,
+      note: reading ? reading.reason || reading.text || undefined : "Not read against this line",
+      /* the filing rounds to whole dollars; a sub-unit gap is that rounding,
+         not two documents disagreeing about the figure */
+      agrees: value !== undefined && Math.abs(delta) < Math.max(tolerance, 1),
       delta,
     };
   });
 
-  const disagreeing = readings.filter((r) => !r.agrees).map((r) => r.docId);
+  const spoke = readings.filter((r) => r.covered);
+  const disagreeing = spoke.filter((r) => !r.agrees).map((r) => r.docId);
 
-  /* every source lands on the same number, and it is not the reconciled one */
-  const values = readings.map((r) => r.value ?? working);
-  const unanimous = values.every((v) => v === values[0]);
-  const shape: DisagreementShape = unanimous
-    ? "consensus"
-    : disagreeing.length === 1
-      ? "single"
-      : "split";
+  let shape: DisagreementShape;
+  if (!spoke.length) {
+    shape = "unverified";
+  } else if (disagreeing.length === 0) {
+    shape = "split";
+  } else if (disagreeing.length === spoke.length && spoke.length > 1) {
+    const values = spoke.map((r) => r.value as number);
+    shape = values.every((v) => Math.abs(v - values[0]) < 1) ? "consensus" : "split";
+  } else {
+    shape = disagreeing.length === 1 ? "single" : "split";
+  }
 
   /* outliers first, largest first — the agreeing tail collapses in the card */
-  readings.sort((a, b) => Number(a.agrees) - Number(b.agrees) || Math.abs(b.delta) - Math.abs(a.delta));
+  readings.sort(
+    (a, b) =>
+      Number(a.covered) - Number(b.covered) ||
+      Number(a.agrees) - Number(b.agrees) ||
+      Math.abs(b.delta) - Math.abs(a.delta)
+  );
 
   return { readings, disagreeing, shape };
 }
 
+/** Which side of the pair a finding is raised against. */
+function sideOf(project: Project, disagreeing: string[]): Disagreement {
+  if (disagreeing.length !== 1) return "both";
+  const doc = documentsOf(project).find((d) => d.id === disagreeing[0]);
+  return doc?.kind === "xlsx" ? "excel" : "pdf";
+}
+
+function firstValueOfKind(readings: SourceReading[], kind: "pdf" | "xlsx") {
+  return readings.find((r) => r.kind === kind && r.covered)?.value;
+}
+
+/**
+ * Every finding in the reconciliation.
+ *
+ * Nothing here is authored: a line the agent matched raises no comment, and a
+ * line it could not match raises the comment its own note explains. The four
+ * kinds are told apart by what the evidence looks like, not by a label in the
+ * data — a line with figures that differ is a value finding, a line with words
+ * that differ is a text finding, a line the filing was checked against itself
+ * on is a footing finding, and a line no source carried is a gap.
+ */
 export function buildIssues(project: Project): Issue[] {
-  const byId = new Map(project.items.map((i) => [i.id, i]));
-  const claimed = new Set([
-    ...FORMULA_ISSUES.map((f) => f.itemId),
-    ...SINGLE_SOURCE_ISSUES.map((f) => f.itemId),
-    ...GAP_ISSUES.map((f) => f.itemId),
-  ]);
+  const issues: Issue[] = [];
 
-  /* the primary pair disagree with each other */
-  const valueIssues: Issue[] = project.items
-    .filter((item) => item.explanation && !claimed.has(item.id))
-    .map((item) => {
-      const read = readSources(project, item, item.valueB, {
-        pdf: item.valueA,
-        excel: item.valueB,
-      });
-      return {
-        id: `val-${item.id}`,
-        kind: "value" as const,
-        side: "both" as const,
-        statement: item.statement,
-        title: item.account,
-        explanation: item.explanation!,
-        confidence: item.confidence,
-        itemId: item.id,
-        workingValue: item.valueB,
-        pdfValue: item.valueA,
-        excelValue: item.valueB,
-        ...read,
-      };
-    });
+  project.items.forEach((item) => {
+    const found = rowById(item.id);
+    if (!found) return;
+    const { section, row } = found;
+    if (row.status === "Matched") return;
 
-  /* exactly one of the primary pair is out */
-  const singleSourceIssues: Issue[] = SINGLE_SOURCE_ISSUES.filter((f) => byId.has(f.itemId)).map(
-    (f) => {
-      const item = byId.get(f.itemId)!;
-      const read = readSources(project, item, f.working, { pdf: f.pdf, excel: f.excel });
-      return {
-        id: f.id,
-        kind: "value" as const,
-        side: f.side,
-        statement: f.statement,
-        title: item.account,
-        explanation: f.explanation,
-        confidence: f.confidence,
-        itemId: f.itemId,
-        workingValue: f.working,
-        pdfValue: f.pdf,
-        excelValue: f.excel,
-        ...read,
-      };
-    }
-  );
+    const { readings, disagreeing, shape } = readSources(project, row, project.tolerance);
+    const spoke = readings.filter((r) => r.covered);
+    const numeric = row.working !== null || spoke.length > 0;
+    /* the filing read against itself — a footing or cross-cast check */
+    const selfCheck = section.referenceDoc === FIXTURE.workingDoc;
 
-  const formulaIssues: Issue[] = FORMULA_ISSUES.filter((f) => byId.has(f.itemId)).map((f) => {
-    const item = byId.get(f.itemId)!;
-    const working = f.side === "excel" ? item.valueA : item.valueB;
-    const read = readSources(project, item, working, { pdf: item.valueA, excel: item.valueB });
-    return {
-      id: f.id,
-      kind: "formula" as const,
-      side: f.side,
-      statement: f.statement,
-      title: item.account,
-      explanation: f.explanation,
-      confidence: f.confidence,
-      itemId: f.itemId,
-      workingValue: working,
-      pdfValue: item.valueA,
-      excelValue: item.valueB,
-      sheet: f.sheet,
-      cell: f.cell,
-      formula: f.formula,
-      expectedFormula: f.expectedFormula,
-      defect: f.defect,
-      ...read,
+    const base = {
+      statement: section.id,
+      title: row.account,
+      itemId: item.id,
+      confidence: item.confidence,
+      workingValue: row.working ?? undefined,
+      pdfValue: firstValueOfKind(readings, "pdf"),
+      excelValue: firstValueOfKind(readings, "xlsx"),
+      readings,
+      disagreeing,
     };
-  });
 
-  /* a further source disagrees on a line the primary pair agreed on */
-  const extraOnly: Issue[] = (project.items
-    .filter((item) => !claimed.has(item.id) && !item.explanation)
-    .map((item): Issue | null => {
-      const overrides = EXTRA_READINGS.filter((r) => r.itemId === item.id);
-      if (!overrides.length) return null;
-      const read = readSources(project, item, item.valueB, {
-        pdf: item.valueA,
-        excel: item.valueB,
-      });
-      if (!read.disagreeing.length) return null;
-
-      const names = read.readings
-        .filter((r) => !r.agrees)
-        .map((r) => r.label)
-        .join(" and ");
-      return {
-        id: `ext-${item.id}`,
-        kind: "value" as const,
-        side: "both" as const,
-        statement: item.statement,
-        title: item.account,
+    if (row.status === "Unmatched") {
+      issues.push({
+        ...base,
+        id: `gap-${item.id}`,
+        kind: "gap",
+        side: "both",
+        shape: "unverified",
+        /* there is no confidence in a reading that was never taken */
+        confidence: 0,
+        gapReason: gapReasonFrom(row.reason),
         explanation:
-          read.shape === "consensus"
-            ? `Every source reports the same figure and the reconciled statement does not. Re-check the extraction for this line.`
-            : `${names} report a different figure from the reconciled statement, which follows ${
-                read.readings.find((r) => r.agrees)?.label ?? "the primary pair"
-              }.`,
-        confidence: item.confidence,
-        itemId: item.id,
-        workingValue: item.valueB,
-        pdfValue: item.valueA,
-        excelValue: item.valueB,
-        ...read,
-      };
-    }) as (Issue | null)[]).filter((x): x is Issue => x !== null);
+          row.reason ||
+          "No source carried this line, so there was nothing to reconcile it against.",
+        /* no source is at fault — the evidence simply is not there */
+        disagreeing: [],
+        readings: readings.map((r) => ({ ...r, covered: false, agrees: false })),
+      });
+      return;
+    }
 
-  /* nothing to compare — every source was opened and none of them settled it */
-  const gapIssues: Issue[] = GAP_ISSUES.filter((g) => byId.has(g.itemId)).map((g) => {
-    const item = byId.get(g.itemId)!;
-    return {
-      id: g.id,
-      kind: "gap" as const,
-      side: "both" as const,
-      shape: "unverified" as const,
-      statement: g.statement,
-      title: item.account,
-      explanation: g.explanation,
-      /* there is no confidence in a reading that was never taken */
-      confidence: 0,
-      gapReason: g.reason,
-      itemId: g.itemId,
-      workingValue: item.valueB,
-      /* no source is at fault — the evidence simply is not there */
-      disagreeing: [],
-      readings: documentsOf(project).map((doc) => ({
-        docId: doc.id,
-        label: doc.label,
-        kind: doc.kind,
-        value: undefined,
-        covered: false,
-        note: g.searched[doc.id] ?? "Not found",
-        agrees: false,
-        delta: 0,
-      })),
-    };
+    if (!numeric || (row.textMatch === "No" && row.variance === null)) {
+      issues.push({
+        ...base,
+        id: `txt-${item.id}`,
+        kind: "text",
+        side: sideOf(project, disagreeing.length ? disagreeing : [section.referenceDoc]),
+        shape: "split",
+        noteId: `note-${row.id}`,
+        workingText: row.workingText,
+        referenceText: referenceTextOf(row),
+        missingIn: row.workingText ? undefined : "working",
+        explanation: row.reason || "The two documents word this passage differently.",
+      });
+      return;
+    }
+
+    issues.push({
+      ...base,
+      id: `${selfCheck ? "fx" : "val"}-${item.id}`,
+      kind: selfCheck ? "formula" : "value",
+      side: sideOf(project, disagreeing),
+      shape,
+      ...(selfCheck
+        ? {
+            sheet: section.shortLabel,
+            cell: `p.${section.page}`,
+            formula: formatFigure(row.working),
+            expectedFormula: formatFigure(spoke[0]?.value),
+            defect: "Does not foot",
+          }
+        : {}),
+      explanation:
+        row.reason ||
+        (shape === "consensus"
+          ? "Every source that carried this line reports the same figure, and the filing does not."
+          : "The sources do not agree on this line."),
+    });
   });
-
-  const textIssues: Issue[] = TEXT_ISSUES.map((t) => ({
-    id: t.id,
-    kind: "text" as const,
-    side: t.side,
-    shape: "split" as const,
-    readings: [],
-    disagreeing: t.side === "pdf" ? ["A"] : ["A", "B"],
-    statement: t.statement,
-    title: t.title,
-    explanation: t.explanation,
-    confidence: t.confidence,
-    noteId: t.noteId,
-    workingText: t.working,
-    referenceText: t.reference,
-    missingIn: t.missingIn,
-  }));
 
   const order: Record<IssueKind, number> = { gap: 0, value: 1, formula: 2, text: 3 };
-  return [
-    ...valueIssues,
-    ...singleSourceIssues,
-    ...extraOnly,
-    ...gapIssues,
-    ...formulaIssues,
-    ...textIssues,
-  ].sort((a, b) => order[a.kind] - order[b.kind]);
+  return issues.sort((a, b) => order[a.kind] - order[b.kind]);
+}
+
+function formatFigure(value: number | null | undefined) {
+  if (value === null || value === undefined) return "—";
+  return value.toLocaleString("en-US", { maximumFractionDigits: 2 });
 }
 
 /** The figure the reconciled document reports, per line. */

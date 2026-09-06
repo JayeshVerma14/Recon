@@ -4,7 +4,7 @@ import * as React from "react";
 import { Check, Minus, X } from "lucide-react";
 
 import { effectiveValue, formatValue } from "@/lib/derive";
-import { statementLabel } from "@/lib/mock";
+import { statementLabel, statementMeta } from "@/lib/mock";
 import { cn } from "@/lib/utils";
 import {
   GAP_INK,
@@ -25,6 +25,20 @@ import type { LineItem, Project, StatementId } from "@/lib/types";
  * an unsupported figure through.
  */
 export type Mark = "tick" | "cross" | "unverified";
+
+/**
+ * A passage, held to two lines. A filing's prose runs to paragraphs and the
+ * page is a table — the comment card carries the full wording and the diff, so
+ * the line only has to say enough to be recognised.
+ */
+function Prose({ text }: { text: string }) {
+  if (!text) return <span className="text-[#B4BDC6]">—</span>;
+  return (
+    <span className="line-clamp-2 block max-w-[150px] whitespace-normal text-left leading-[13px]">
+      {text}
+    </span>
+  );
+}
 
 export function DocumentPage({
   project,
@@ -87,32 +101,37 @@ export function DocumentPage({
     const issue = issueByItem.get(item.id);
     return issue?.pdfValue ?? item.valueA;
   };
-  const prior = (item: LineItem) =>
-    variant === "working" ? item.valueA : Math.round(item.valueA * 0.93);
+  /* the facing column is whatever this pane is not: the filing beside the
+     source it was read against, never a year nobody supplied */
+  const facing = (item: LineItem) =>
+    variant === "working" ? item.valueA : effectiveValue(item);
+  const meta = statementMeta(statement);
 
   return (
     <div className="mx-auto w-full max-w-[720px] rounded-sm bg-white px-7 py-7 shadow-[0_1px_3px_rgba(10,37,64,0.16)]">
       <div className="mb-4 flex flex-col items-center gap-0.5 text-center">
         <span className="font-serif text-[12px] font-semibold text-[#1B2733]">
-          {project.entity} and Subsidiaries
+          {project.entity}
         </span>
         <span className="font-serif text-[12px] font-semibold text-[#1B2733]">
-          Consolidated {statementLabel(statement).replace(" Statement", "")} Statements
+          {statementLabel(statement)}
         </span>
-        <span className="font-serif text-[10px] italic text-[#5A6672]">
-          (In thousands, except share and per share data)
-        </span>
+        {meta?.period && (
+          <span className="font-serif text-[10px] italic text-[#5A6672]">
+            As of {meta.period}
+          </span>
+        )}
       </div>
 
       <table className="w-full border-collapse">
         <thead>
           <tr className="border-b border-[#C9D3DD]">
             <th />
-            <th className="py-1 text-right text-[10px] font-semibold text-[#1B2733]">
-              September 30, {periods[0].replace(/\D/g, "")}
+            <th className="max-w-[140px] py-1 text-right text-[10px] font-semibold text-[#1B2733]">
+              {periods[0]}
             </th>
-            <th className="py-1 pl-3 text-right text-[10px] font-semibold text-[#1B2733]">
-              September 30, {periods[1].replace(/\D/g, "")}
+            <th className="max-w-[140px] py-1 pl-3 text-right text-[10px] font-semibold text-[#1B2733]">
+              {periods[1]}
             </th>
             {gutter && (
               <th className="py-1 pl-3 text-right text-[8px] font-medium uppercase tracking-wider text-[#9AA5B1]">
@@ -196,7 +215,7 @@ export function DocumentPage({
                         : undefined
                     }
                   >
-                    {formatValue(value(item), item.unit)}
+                    {item.text ? <Prose text={item.text.working} /> : formatValue(value(item), item.unit)}
                   </span>
                   {number !== undefined && (
                     <button
@@ -218,8 +237,17 @@ export function DocumentPage({
                   )}
                 </td>
 
-                <td className="py-[3px] pl-3 text-right font-mono text-[10px] tabular-nums text-[#7C8794]">
-                  {formatValue(prior(item), item.unit)}
+                <td
+                  className={cn(
+                    "py-[3px] pl-3 text-[10px] text-[#7C8794]",
+                    item.text ? "text-left" : "text-right font-mono tabular-nums"
+                  )}
+                >
+                  {item.text ? (
+                    <Prose text={item.text.reference} />
+                  ) : (
+                    formatValue(facing(item), item.unit)
+                  )}
                 </td>
 
                 {gutter && (
