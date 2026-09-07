@@ -27,6 +27,70 @@ import type { LineItem, Project, StatementId } from "@/lib/types";
 export type Mark = "tick" | "cross" | "unverified";
 
 /**
+ * How much of the evidence stands behind the figure on this line.
+ *
+ * One segment per source in the run: filled where the source read the line and
+ * reported the same figure, hollow-and-struck where it read the line and
+ * differs, and a bare dot where it never read the line at all. Two filled and
+ * one hollow is the commonest real case — two documents back the filing and one
+ * strayed — and it is the case a reviewer clears fastest, so the page says it
+ * without being asked.
+ *
+ * Filled against hollow is a difference in shape, not in hue, so it survives a
+ * greyscale printout and a reader who cannot separate the colours.
+ */
+function SourceMeter({
+  readings,
+  working,
+}: {
+  readings?: SourceReading[];
+  working: number;
+}) {
+  if (!readings?.length) return null;
+
+  const spoke = readings.filter((r) => r.covered);
+  if (!spoke.length) return null;
+  const backing = spoke.filter((r) => r.agrees).length;
+
+  return (
+    <span
+      className="ml-1 inline-flex translate-y-[-1px] items-center gap-[2px] align-middle"
+      title={`${backing} of the ${spoke.length} source${
+        spoke.length === 1 ? "" : "s"
+      } that read this line report${spoke.length === 1 ? "s" : ""} ${formatValue(
+        working,
+        "currency"
+      )}${
+        readings.length > spoke.length
+          ? ` · ${readings.length - spoke.length} did not read it`
+          : ""
+      }`}
+    >
+      {[...readings]
+        .sort((a, b) => a.docId.localeCompare(b.docId))
+        .map((reading) =>
+          reading.covered ? (
+            <span
+              key={reading.docId}
+              className={cn(
+                "h-[7px] w-[3px] rounded-[1px]",
+                reading.agrees ? "bg-[#179864]" : "border border-[#C2410C] bg-transparent"
+              )}
+              aria-hidden
+            />
+          ) : (
+            <span
+              key={reading.docId}
+              className="h-[3px] w-[3px] rounded-full bg-[#C9D3DD]"
+              aria-hidden
+            />
+          )
+        )}
+    </span>
+  );
+}
+
+/**
  * What the page amounts to, said once.
  *
  * A reconciliation agrees far more often than it disagrees — across this run,
@@ -332,6 +396,9 @@ export function DocumentPage({
                       <BadgeGlyph n={number} disposition={disposition} />
                     </button>
                   )}
+                  {issue && issue.kind !== "gap" && (
+                    <SourceMeter readings={readingsByItem.get(item.id)} working={value(item)} />
+                  )}
                 </td>
 
                 <td
@@ -525,20 +592,38 @@ function AgreementStrip({
   );
 }
 
-const BADGE_BG: Record<Disposition | "open" | "query", string> = {
-  open: "bg-critical",
+const BADGE_BG: Record<string, string> = {
+  /* one source strayed and the rest back the filing — a correction to raise */
+  single: "bg-[#B45309]",
+  /* the only source that read the line disagrees, and nothing backs the figure */
+  uncorroborated: "bg-[#C2410C]",
+  /* every source lands on the same figure and the filing is the odd one out */
+  consensus: "bg-critical",
+  /* no majority — somebody has to decide which document stands */
+  split: "bg-[#6D28D9]",
   /* an open gap is not an error — it is an unanswered question */
   query: "bg-[#0E7490]",
+  open: "bg-critical",
   resolved: "bg-[#179864]",
   flagged: "bg-[#F59E0B]",
   dismissed: "bg-[#94A3B8]",
   accepted: "bg-[#0B5A70]",
 };
 
-/** Red for a difference, teal for a question, the disposition once there is one. */
+/**
+ * What the badge is coloured by.
+ *
+ * Every open finding used to be the same red, which flattened four situations a
+ * reviewer handles quite differently: one document strayed while the rest back
+ * the filing; the only document that read the line disagrees; every document
+ * agrees and the filing is the outlier; or nobody has a majority. The colour
+ * now says which, and the shape's own name says it in words on the card.
+ */
 function badgeTone(issue: Issue | undefined, disposition?: Disposition) {
   if (disposition) return disposition;
-  return issue?.kind === "gap" ? "query" : "open";
+  if (!issue) return "open";
+  if (issue.kind === "gap") return "query";
+  return BADGE_BG[issue.shape] ? issue.shape : "open";
 }
 
 function BadgeGlyph({ n, disposition }: { n: number; disposition?: Disposition }) {

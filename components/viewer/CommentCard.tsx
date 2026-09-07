@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import {
+  AlertTriangle,
   Check,
   ChevronDown,
   CircleDashed,
@@ -124,9 +125,13 @@ export function CommentCard({
       ? Flag
       : issue.shape === "consensus"
         ? Sigma
-        : GitCompareArrows;
-  /* on a gap no source is an outlier — none of them had a figure to be out by */
-  const outlierNames = gap ? [] : issue.readings.filter((r) => !r.agrees).map((r) => r.label);
+        : issue.shape === "uncorroborated"
+          ? AlertTriangle
+          : GitCompareArrows;
+  /* only a source that read the line can be an outlier on it */
+  const spoke = issue.readings.filter((r) => r.covered);
+  const outlierNames = gap ? [] : spoke.filter((r) => !r.agrees).map((r) => r.label);
+  const backing = gap ? 0 : spoke.length - outlierNames.length;
   const closed = disposition !== undefined;
 
   if (mode === "read") {
@@ -183,7 +188,7 @@ export function CommentCard({
               <ShapeIcon className="h-2.5 w-2.5" />
               {gap
                 ? (reason?.label ?? shape.label)
-                : issue.shape === "single" && outlierNames.length === 1
+                : outlierNames.length === 1 && issue.shape !== "consensus"
                   ? `${outlierNames[0]} is out`
                   : shape.label}
             </span>
@@ -201,8 +206,14 @@ export function CommentCard({
           </div>
         </div>
 
-        {/* a reading that was never taken has no confidence to report, so the
-            slot carries coverage instead: how many sources yielded a figure */}
+        {/*
+          * How much of the evidence stands behind the figure the filing prints.
+          *
+          * This slot used to hold a percentage, which read as certainty and was
+          * not: 40% and 99% were the same arithmetic over a different number of
+          * sources. Two of three backing a figure and none of one backing it are
+          * the two facts a reviewer weighs, so the slot states them.
+          */}
         {gap ? (
           <span
             title={`No figure obtained from any of the ${issue.readings.length} sources`}
@@ -212,8 +223,20 @@ export function CommentCard({
             0/{issue.readings.length}
           </span>
         ) : (
-          <span className="tabular shrink-0 rounded bg-surface-secondary px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
-            {issue.confidence}%
+          <span
+            title={
+              spoke.length === 0
+                ? "No source read this line"
+                : `${backing} of the ${spoke.length} sources that read this line report the same figure as the filing`
+            }
+            className={cn(
+              "tabular shrink-0 rounded px-1.5 py-0.5 font-mono text-[11px]",
+              backing === 0
+                ? "bg-[rgba(234,88,12,0.12)] text-[#C2410C]"
+                : "bg-surface-secondary text-muted-foreground"
+            )}
+          >
+            {backing}/{spoke.length} back it
           </span>
         )}
       </div>
@@ -646,11 +669,21 @@ function SourceLedger({
   const [expanded, setExpanded] = React.useState(false);
 
   const working = issue.workingValue ?? item.valueB;
-  const outliers = issue.readings.filter((r) => !r.agrees);
-  const agreeing = issue.readings.filter((r) => r.agrees);
+  /*
+   * Three buckets, because a source has three possible relationships to a line
+   * and only two of them are evidence. A document that was never read against
+   * this line has no opinion about it — showing it beside the figure it did not
+   * report, as this once did, invents corroboration.
+   */
+  const spoke = issue.readings.filter((r) => r.covered);
+  const outliers = spoke.filter((r) => !r.agrees);
+  const agreeing = spoke.filter((r) => r.agrees);
+  const silent = issue.readings.filter((r) => !r.covered);
 
   /* how far apart the sources are from each other, not from the output */
-  const distinct = Array.from(new Set(issue.readings.map((r) => r.value ?? working)));
+  const distinct = Array.from(
+    new Set(spoke.map((r) => r.value as number).concat(working))
+  );
   const spread =
     distinct.length > 1 ? Math.max(...distinct) - Math.min(...distinct) : 0;
 
@@ -685,7 +718,7 @@ function SourceLedger({
               {formatDifference(row.delta, item.unit)}
             </span>
             <span className="tabular font-mono text-body-sm text-critical">
-              {formatValue(row.value ?? working, item.unit)}
+              {formatValue(row.value as number, item.unit)}
             </span>
           </span>
         </div>
@@ -723,11 +756,26 @@ function SourceLedger({
                   {row.label}
                 </span>
                 <span className="tabular ml-auto font-mono text-helper text-muted-foreground">
-                  {formatValue(row.value ?? working, item.unit)}
+                  {formatValue(row.value as number, item.unit)}
                 </span>
               </div>
             ))}
         </>
+      )}
+
+      {silent.length > 0 && (
+        <div className="flex items-start gap-2 border-t border-dashed border-border-subtle px-2.5 py-1.5">
+          <CircleDashed
+            className="mt-[1px] h-3 w-3 shrink-0"
+            style={{ color: GAP_INK.fg }}
+          />
+          <span className="min-w-0 text-meta text-muted-foreground">
+            <span className="uppercase tracking-wider" style={{ color: GAP_INK.strong }}>
+              {silent.length} not read against this line
+            </span>
+            <span className="block truncate">{silent.map((r) => r.label).join(" · ")}</span>
+          </span>
+        </div>
       )}
 
       {/* no source is presumed right — say how far apart they are */}
