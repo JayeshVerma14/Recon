@@ -3,6 +3,7 @@
 import * as React from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
+  AlertTriangle,
   Check,
   CheckCheck,
   CircleDashed,
@@ -54,12 +55,22 @@ import type { Project, StatementId } from "@/lib/types";
 type CommentFilter = "open" | "closed" | "all";
 
 /**
- * Findings, worst first. A line nobody could check sits second only to a
- * definite extraction error: it is not wrong, but it is the one thing on the
- * page that reads as fine when it is not, so it is never buried under the
- * disagreements.
+ * Findings, worst first.
+ *
+ * An extraction error leads: every source agrees and the filing does not. Then
+ * a difference with nothing behind it — one source read the line, it disagrees,
+ * and no other document backs the printed figure either way. A line nobody
+ * could check comes next: it is not wrong, but it is the one thing on the page
+ * that reads as fine when it is not, so it is never buried under the
+ * disagreements. Only then the cases where the weight of evidence is clear.
  */
-const SHAPE_ORDER: DisagreementShape[] = ["consensus", "unverified", "single", "split"];
+const SHAPE_ORDER: DisagreementShape[] = [
+  "consensus",
+  "uncorroborated",
+  "unverified",
+  "single",
+  "split",
+];
 
 /* the run's own section order — a real filing runs to dozens, and they are
    read in the order the document prints them */
@@ -856,6 +867,8 @@ export function ReconcileViewer({
                                   <Flag className="h-2.5 w-2.5" />
                                 ) : group.shape === "consensus" ? (
                                   <FileText className="h-2.5 w-2.5" />
+                                ) : group.shape === "uncorroborated" ? (
+                                  <AlertTriangle className="h-2.5 w-2.5" />
                                 ) : group.shape === "unverified" ? (
                                   <CircleDashed className="h-2.5 w-2.5" />
                                 ) : (

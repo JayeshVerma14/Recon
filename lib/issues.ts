@@ -45,7 +45,12 @@ export interface SourceReading {
  * unanimous set that still differs from the reconciled figure is the agent's
  * own extraction error.
  */
-export type DisagreementShape = "single" | "split" | "consensus" | "unverified";
+export type DisagreementShape =
+  | "single"
+  | "split"
+  | "consensus"
+  | "uncorroborated"
+  | "unverified";
 
 export const SHAPE_META: Record<
   DisagreementShape,
@@ -53,9 +58,24 @@ export const SHAPE_META: Record<
 > = {
   single: {
     label: "One source out",
-    hint: "every other source agrees",
+    hint: "every other source backs the filing",
     tint: "rgba(245,158,11,0.14)",
     fg: "#B45309",
+  },
+  /*
+   * One source read the line, and it disagrees. Nothing else read it at all.
+   *
+   * This looks like "one source out" and is not: there, the rest of the
+   * evidence backs the figure the filing prints, and the correction goes to the
+   * one document that strayed. Here nothing backs it. The difference is real
+   * and which side is wrong is an open question — so it is never drawn as the
+   * mild case, which is what a single amber flag would make it.
+   */
+  uncorroborated: {
+    label: "Uncorroborated difference",
+    hint: "the only source that read this line disagrees",
+    tint: "rgba(234,88,12,0.12)",
+    fg: "#C2410C",
   },
   split: {
     label: "Sources split",
@@ -255,7 +275,17 @@ function gapReasonFrom(reason: string): GapReason {
 function readSources(project: Project, row: FixtureRow, tolerance: number) {
   const working = row.working ?? 0;
 
-  const readings: SourceReading[] = documentsOf(project).map((doc) => {
+  /*
+   * The filing is not evidence about itself. It appears here only where a sheet
+   * genuinely read it against itself — a footing or cross-cast check — and
+   * otherwise its figure is the one every reading is measured against, shown
+   * once at the head of the ledger rather than as a source among sources.
+   */
+  const sources = documentsOf(project).filter(
+    (doc) => doc.id !== FIXTURE.workingDoc || row.readings.some((r) => r.docId === doc.id)
+  );
+
+  const readings: SourceReading[] = sources.map((doc) => {
     const reading = row.readings.find((r) => r.docId === doc.id);
     const value = reading?.value ?? undefined;
     const delta = value === undefined ? 0 : Number((value - working).toFixed(2));
@@ -273,19 +303,34 @@ function readSources(project: Project, row: FixtureRow, tolerance: number) {
     };
   });
 
+  /*
+   * Three states, not two. A source that read the line and agreed is evidence
+   * for the figure; one that read it and differs is evidence against. A source
+   * that was never read against this line is neither, and counting it as
+   * agreement manufactures corroboration the reconciliation does not have.
+   */
   const spoke = readings.filter((r) => r.covered);
-  const disagreeing = spoke.filter((r) => !r.agrees).map((r) => r.docId);
+  const out = spoke.filter((r) => !r.agrees);
+  const backing = spoke.length - out.length;
+  const disagreeing = out.map((r) => r.docId);
 
   let shape: DisagreementShape;
   if (!spoke.length) {
     shape = "unverified";
-  } else if (disagreeing.length === 0) {
+  } else if (!out.length) {
     shape = "split";
-  } else if (disagreeing.length === spoke.length && spoke.length > 1) {
-    const values = spoke.map((r) => r.value as number);
-    shape = values.every((v) => Math.abs(v - values[0]) < 1) ? "consensus" : "split";
+  } else if (!backing) {
+    /* nothing supports the printed figure: either the one source that read the
+       line disagrees, or every source does and the filing is the odd one out */
+    const values = out.map((r) => r.value as number);
+    shape =
+      spoke.length === 1
+        ? "uncorroborated"
+        : values.every((v) => Math.abs(v - values[0]) < 1)
+          ? "consensus"
+          : "split";
   } else {
-    shape = disagreeing.length === 1 ? "single" : "split";
+    shape = out.length === 1 ? "single" : "split";
   }
 
   /* outliers first, largest first — the agreeing tail collapses in the card */
